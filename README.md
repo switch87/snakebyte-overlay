@@ -13,22 +13,23 @@ hier, zodat de overlay niet afhangt van het syncen van andere overlays.
 | Pakket | Versie(s) | Omschrijving | Licentie | Opmerking |
 |---|---|---|---|---|
 | `dev-libs/libpresage` | 0.9.1 | Predictieve tekstinvoer (woordvoorspelling) | GPL-3 | |
-| `dev-python/PyMuPDF` | 1.27.2.3 | Python-bibliotheek voor PDF-bewerking | AGPL-3 | afhankelijkheid van rayforge |
+| `dev-python/PyMuPDF` | 1.28.2 | Python-bibliotheek voor PDF-bewerking | AGPL-3 | afhankelijkheid van rayforge |
 | `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP-sockets | MIT | afhankelijkheid van rayforge |
 | `dev-python/ezdxf` | 1.4.4 | DXF-tekeningen maken en bewerken | MIT | kopie uit `::guru`, afhankelijkheid van rayforge |
-| `dev-python/mupdf` | 1.27.2 | Python-bindings voor MuPDF | AGPL-3 | afhankelijkheid van PyMuPDF; gepind op `app-text/mupdf` uit `::gentoo` |
-| `dev-python/pipcl` | 2 | Build-helper voor MuPDF/PyMuPDF | AGPL-3 | afhankelijkheid van PyMuPDF |
+| `dev-python/mupdf` | 1.28.2 | Python-bindings voor MuPDF | AGPL-3 | afhankelijkheid van PyMuPDF; vereist exact dezelfde versie van `app-text/mupdf` |
+| `dev-python/pipcl` | 13 | Build-helper voor MuPDF/PyMuPDF | AGPL-3 | afhankelijkheid van PyMuPDF |
 | `dev-python/py-slvs` | 1.0.6 | Python-binding voor de SolveSpace constraint solver | GPL-3 | |
-| `dev-python/pymupdf-fonts` | 1.0.4 | Optionele fonts voor PyMuPDF | OFL-1.1 | afhankelijkheid van PyMuPDF |
+| `dev-python/pymupdf-fonts` | 1.0.5 | Optionele fonts voor PyMuPDF | OFL-1.1 | afhankelijkheid van PyMuPDF |
 | `dev-python/pyvips` | 3.2.0 | Python-binding voor libvips | MIT | afhankelijkheid van rayforge |
-| `dev-python/raygeo` | 1.49.0 | 2D/3D-geometrie voor CAD/CAM (Rust + Python) | MIT | afhankelijkheid van rayforge |
+| `dev-python/raydriver` | 0.2.0 | Machine-drivers voor rayforge (Rust + Python) | MIT | afhankelijkheid van rayforge |
+| `dev-python/raygeo` | 1.59.0 | 2D/3D-geometrie voor CAD/CAM (Rust + Python) | MIT | afhankelijkheid van rayforge |
+| `dev-python/ruida-pa` | 0.21.2 | Ruida-protocolanalyse en -driver | MIT | afhankelijkheid van rayforge; bokeh/textual optioneel |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG-parser | MIT | kopie uit `::guru`, afhankelijkheid van rayforge |
 | `dev-python/vtracer` | 0.6.15 | Raster-naar-vector (VTracer, Rust + Python) | MIT | afhankelijkheid van rayforge |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (laser- en snijmodule H2D/H2C) — Windows-build via Wine | all-rights-reserved | zie hieronder |
-| `media-gfx/rayforge` | 1.11.0 | G-code-generator en besturing voor lasersnijders/-graveerders | MIT | |
-| `media-plugins/gst-plugins-rs` | 1.29.1 | GStreamer-plugins in Rust | LGPL-2.1+/MIT/Apache-2.0/MPL-2.0 | work in progress, nog geen Manifest |
-| `media-sound/noson-app` | 5.6.17 | SONOS-bediening voor Linux | GPL-3 | ook in `::guru` |
-| `media-video/stremio` | 1.0.0_beta12 | Stremio (nieuwe Rust/CEF-shell) | GPL-3 | |
+| `media-gfx/rayforge` | 1.12.0 | G-code-generator en besturing voor lasersnijders/-graveerders | MIT | |
+| `media-sound/noson-app` | 5.7.5 | SONOS-bediening voor Linux (Qt6) | GPL-3 | ook in `::guru` (ouder) |
+| `media-video/stremio` | 1.2.1 | Stremio (nieuwe GTK4/WebKitGTK-shell) | GPL-3 | vereist GTK ≥ 4.22 en libadwaita ≥ 1.9 (nog `~amd64`) |
 
 Alle ebuilds gebruiken EAPI 8 en staan op `~amd64`.
 
@@ -52,6 +53,13 @@ ebuild + Manifest aan:
 ```sh
 bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 ```
+
+### `media-gfx/rayforge` en de PDF-keten
+
+`dev-python/mupdf` bouwt tegen de systeem-MuPDF en vereist exact dezelfde
+versie (`~app-text/mupdf-${PV}`). Update `app-text/mupdf`, `dev-python/mupdf`
+en `dev-python/PyMuPDF` daarom altijd samen, en pin `app-text/mupdf` op die
+versie in `package.accept_keywords` (bv. `=app-text/mupdf-1.28.2* ~amd64`).
 
 ## Installatie
 

@@ -1,7 +1,7 @@
 # Copyright 1999-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-# Based on the mupdf-1.27.2.ebuild from the ::4nykey overlay
+# Based on the mupdf-1.28.2.ebuild from the ::4nykey overlay
 # (Python/C++ bindings for MuPDF, built from the upstream source
 # tarball against the system app-text/mupdf of the same version).
 

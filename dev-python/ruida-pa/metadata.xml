@@ -6,6 +6,7 @@
 		<name>Gert Pellin</name>
 	</maintainer>
 	<upstream>
-		<remote-id type="freedesktop-gitlab">gstreamer/gst-plugins-rs</remote-id>
+		<remote-id type="github">StevenIsaacs/ruida-pa</remote-id>
+		<remote-id type="pypi">ruida-pa</remote-id>
 	</upstream>
 </pkgmetadata>

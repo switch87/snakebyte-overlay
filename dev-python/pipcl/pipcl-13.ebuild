@@ -1,7 +1,7 @@
 # Copyright 1999-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-# Based on the pipcl-2.ebuild from the ::4nykey overlay,
+# Based on the pipcl-13.ebuild from the ::4nykey overlay,
 # with SRC_URI rewritten to plain GitHub (no custom mirrors).
 
 EAPI=8

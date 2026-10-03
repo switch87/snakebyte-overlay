@@ -1,7 +1,7 @@
 # Copyright 1999-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-# Based on the PyMuPDF-1.27.2.3.ebuild from the ::4nykey overlay,
+# Based on the PyMuPDF-1.28.2.ebuild from the ::4nykey overlay,
 # with SRC_URI rewritten to plain GitHub (no custom mirrors).
 
 EAPI=8
@@ -24,9 +24,9 @@ SLOT="0"
 KEYWORDS="~amd64"
 
 DEPEND="
-	dev-python/mupdf:=[${PYTHON_USEDEP}]
+	>=dev-python/mupdf-1.28:=[${PYTHON_USEDEP}]
 	dev-python/pymupdf-fonts[${PYTHON_USEDEP}]
-	dev-python/pipcl[${PYTHON_USEDEP}]
+	>=dev-python/pipcl-9[${PYTHON_USEDEP}]
 "
 RDEPEND="
 	${DEPEND}

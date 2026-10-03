@@ -15,7 +15,7 @@ CRATES="
 	approx@0.5.1
 	arrayvec@0.7.6
 	autocfg@1.5.0
-	bitflags@2.13.1
+	bitflags@2.13.2
 	bumpalo@3.20.2
 	bytemuck@1.25.0
 	bytemuck_derive@1.11.0
@@ -52,7 +52,7 @@ CRATES="
 	glam@0.30.10
 	glam@0.31.1
 	glam@0.32.1
-	glam@0.33.5
+	glam@0.33.10
 	hash32@0.3.1
 	hashbrown@0.16.1
 	hashbrown@0.17.1
@@ -116,7 +116,7 @@ CRATES="
 	pyo3@0.28.3
 	quote@1.0.45
 	r-efi@6.0.0
-	rand@0.10.2
+	rand@0.10.3
 	rand@0.8.6
 	rand_chacha@0.3.1
 	rand_core@0.10.1
@@ -164,8 +164,8 @@ CRATES="
 	syn@2.0.117
 	syn@3.0.3
 	target-lexicon@0.13.5
-	thiserror-impl@2.0.20
-	thiserror@2.0.20
+	thiserror-impl@2.0.21
+	thiserror@2.0.21
 	time-core@0.1.8
 	time@0.3.47
 	tiny-keccak@2.0.2
@@ -206,9 +206,9 @@ CRATES="
 	zerocopy-derive@0.8.48
 	zerocopy@0.8.48
 	zmij@1.0.21
-	zstd-safe@7.2.4
-	zstd-sys@2.0.16+zstd.1.5.7
-	zstd@0.13.3
+	zstd-safe@8.0.0
+	zstd-sys@2.1.0+zstd.1.5.7
+	zstd@0.14.0
 "
 
 inherit cargo distutils-r1 pypi
@@ -225,7 +225,7 @@ SRC_URI+="
 LICENSE="MIT"
 # Dependent crate licenses
 LICENSE+="
-	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 CC0-1.0 MIT
+	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 BSD CC0-1.0 MIT
 	Unicode-3.0 Unicode-DFS-2016 ZLIB
 "
 SLOT="0"
