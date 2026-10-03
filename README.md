@@ -29,7 +29,7 @@ hier, zodat de overlay niet afhangt van het syncen van andere overlays.
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (laser- en snijmodule H2D/H2C) — Windows-build via Wine | all-rights-reserved | zie hieronder |
 | `media-gfx/rayforge` | 1.12.0 | G-code-generator en besturing voor lasersnijders/-graveerders | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS-bediening voor Linux (Qt6) | GPL-3 | ook in `::guru` (ouder) |
-| `media-video/stremio` | 1.2.1 | Stremio (nieuwe GTK4/WebKitGTK-shell) | GPL-3 | vereist GTK ≥ 4.22 en libadwaita ≥ 1.9 (nog `~amd64`) |
+| `media-video/stremio` | 1.2.1 | Stremio (nieuwe GTK4/WebKitGTK-shell) | GPL-3 | gepatcht om met stabiele GTK 4.20 / libadwaita 1.8 te bouwen |
 
 Alle ebuilds gebruiken EAPI 8 en staan op `~amd64`.
 

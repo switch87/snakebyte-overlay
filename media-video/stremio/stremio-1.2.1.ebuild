@@ -386,8 +386,8 @@ KEYWORDS="~amd64"
 
 DEPEND="
 	>=dev-libs/glib-2.84:2
-	>=gui-libs/gtk-4.22:4[wayland]
-	>=gui-libs/libadwaita-1.9:1
+	>=gui-libs/gtk-4.20:4[wayland]
+	>=gui-libs/libadwaita-1.8:1
 	>=net-libs/webkit-gtk-2.52:6
 	media-video/mpv:=[libmpv]
 	media-libs/libepoxy
@@ -409,6 +409,16 @@ QA_FLAGS_IGNORED="usr/libexec/stremio/stremio"
 src_prepare() {
 	default
 
+	# Upstream enables the gtk4-rs v4_22 / libadwaita-rs v1_9 API levels,
+	# but uses nothing newer than GTK 4.20 / libadwaita 1.8 (verified with
+	# cargo check). Lower them so we build against stable GTK.
+	sed -i \
+		-e '/^gtk = /s/"v4_22"/"v4_20"/' \
+		-e '/^adw = /s/"v1_9"/"v1_8"/' \
+		Cargo.toml || die
+	grep -q '"v4_20"' Cargo.toml && grep -q '"v1_8"' Cargo.toml \
+		|| die "lowering gtk/libadwaita API levels failed"
+
 	# Upstream only knows the in-tree (dev) and flatpak locale dirs.
 	sed -i \
 		-e 's|concat!(env!("CARGO_MANIFEST_DIR"), "/po")|"/usr/share/locale"|' \
@@ -417,7 +427,9 @@ src_prepare() {
 
 	# build.rs compiles the GSettings schema into the user's data dir;
 	# we install and compile it system-wide instead.
-	sed -i -e '/setup_schemas(/d' build.rs || die
+	sed -i -e '/^[[:space:]]*setup_schemas("/d' build.rs || die
+	grep -q '^[[:space:]]*setup_schemas("' build.rs \
+		&& die "removing the setup_schemas() call failed"
 }
 
 src_install() {
