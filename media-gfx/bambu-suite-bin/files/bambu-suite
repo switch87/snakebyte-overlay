@@ -1,0 +1,52 @@
+#!/bin/bash
+# Launcher for the Windows build of Bambu Suite running under Wine.
+# The program files live read-only in /opt/bambu-suite; every user gets
+# a private Wine prefix that is prepared on first start.
+
+set -e
+
+APPDIR=/opt/bambu-suite
+PREFIX_VERSION=1
+
+# Wine on Gentoo is slotted; eselect-wine provides the active version here
+export PATH="/etc/eselect/wine/bin:${PATH}"
+
+export WINEPREFIX="${BAMBU_SUITE_WINEPREFIX:-${XDG_DATA_HOME:-${HOME}/.local/share}/bambu-suite/prefix}"
+export WINEARCH=win64
+export WINEDEBUG="${WINEDEBUG:--all}"
+# don't let Wine create .desktop entries/file associations for the prefix
+export WINEDLLOVERRIDES="winemenubuilder.exe=d${WINEDLLOVERRIDES:+;${WINEDLLOVERRIDES}}"
+
+notify() {
+	echo "bambu-suite: $*" >&2
+	command -v notify-send >/dev/null && notify-send -a "Bambu Suite" "Bambu Suite" "$*" || true
+}
+
+prepare_prefix() {
+	notify "Wine-prefix wordt voorbereid in ${WINEPREFIX} (eenmalig, even geduld)..."
+	mkdir -p "${WINEPREFIX}"
+	wineboot --init
+	wineserver --wait
+
+	# Bambu Suite only shows a window when Wine reports Windows 11
+	wine winecfg /v win11
+	wineserver --wait
+
+	# Visual C++ 2015-2022 runtime, shipped inside the upstream installer
+	wine "${APPDIR}/redist/VC_redist.x64.exe" /install /quiet /norestart || true
+	wineserver --wait
+
+	# fonts the upstream installer registers system-wide
+	local fontdir="${WINEPREFIX}/drive_c/windows/Fonts"
+	mkdir -p "${fontdir}"
+	cp -f "${APPDIR}"/fonts/*.ttf "${fontdir}/"
+
+	echo "${PREFIX_VERSION}" > "${WINEPREFIX}/.bambu-suite-prefix"
+}
+
+if [[ "$(cat "${WINEPREFIX}/.bambu-suite-prefix" 2>/dev/null)" != "${PREFIX_VERSION}" ]]; then
+	prepare_prefix
+fi
+
+cd "${APPDIR}/app"
+exec wine "${APPDIR}/app/BambuSuite.exe" "$@"

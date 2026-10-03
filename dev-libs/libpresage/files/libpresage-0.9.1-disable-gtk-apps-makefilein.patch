@@ -1,0 +1,9 @@
+diff --git a/apps/Makefile.in b/apps/Makefile.in
+index 9c4c6b3..e1b2a55 100644
+--- a/apps/Makefile.in
++++ b/apps/Makefile.in
+@@ -206,7 +206,6 @@ top_builddir = @top_builddir@
+ top_srcdir = @top_srcdir@
+ SUBDIRS = \
+-	gtk \
+ 	console

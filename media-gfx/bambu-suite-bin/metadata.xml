@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+	</maintainer>
+	<longdescription lang="en">
+		Bambu Suite drives the laser and cutting modules of the Bambu Lab
+		H2D/H2C. Upstream only ships Windows and macOS builds; this package
+		unpacks the Windows installer into /opt and runs it through Wine with
+		a per-user prefix (Windows 11 mode, bundled VC++ runtime).
+	</longdescription>
+</pkgmetadata>

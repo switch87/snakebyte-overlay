@@ -1,0 +1,21 @@
+--- a/configure.ac
++++ b/configure.ac
+@@ -193,6 +193,9 @@ AC_SUBST(PRESAGE_LIBS)
+ 
+ AM_CONDITIONAL([BUILD_APPS], [true])
+ 
++# Disable GTK apps entirely
++AM_CONDITIONAL([BUILD_GTK_APPS], [false])
++
+ AC_CONFIG_FILES([
+ Makefile
+ src/Makefile
+@@ -200,7 +203,6 @@ src/lib/Makefile
+ apps/Makefile
+ apps/cli/Makefile
+ apps/dbus/Makefile
+-apps/gtk/Makefile
+ ])
+ 
+ AC_OUTPUT
+

@@ -1,0 +1,26 @@
+#!/bin/bash
+# Create an ebuild for the newest Bambu Suite release in the local overlay.
+# Usage: sudo bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
+
+set -euo pipefail
+
+PKGDIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+url=$(curl -fsSL -A 'Mozilla/5.0 (X11; Linux x86_64)' https://bambulab.com/en/download/suite \
+	| grep -oE 'https://[^"]*/setup/[0-9_]+/Bambu_Suite_Public_Win_[0-9.]+\.exe' | head -n1)
+[[ -n ${url} ]] || { echo "no Windows download link found" >&2; exit 1; }
+
+stamp=$(sed -E 's|.*/setup/([0-9_]+)/.*|\1|' <<<"${url}")
+ver=$(sed -E 's|.*_Win_([0-9.]+)\.exe|\1|' <<<"${url}")
+new="${PKGDIR}/bambu-suite-bin-${ver}.ebuild"
+
+if [[ -e ${new} ]]; then
+	echo "bambu-suite-bin-${ver} already exists"
+	exit 0
+fi
+
+latest=$(ls "${PKGDIR}"/bambu-suite-bin-*.ebuild | sort -V | tail -n1)
+sed -E "s/^BUILD_STAMP=.*/BUILD_STAMP=\"${stamp}\"/" "${latest}" > "${new}"
+ebuild "${new}" manifest
+echo "created ${new}"
+echo "install with: emerge -av media-gfx/bambu-suite-bin"

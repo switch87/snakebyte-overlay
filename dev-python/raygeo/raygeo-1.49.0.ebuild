@@ -1,0 +1,247 @@
+# Copyright 1999-2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+EAPI=8
+
+DISTUTILS_EXT=1
+DISTUTILS_USE_PEP517=maturin
+PYTHON_COMPAT=( python3_{11..14} )
+
+CRATES="
+	aho-corasick@1.1.4
+	allocator-api2@0.2.21
+	android_system_properties@0.1.5
+	anyhow@1.0.102
+	approx@0.5.1
+	arrayvec@0.7.6
+	autocfg@1.5.0
+	bitflags@2.13.1
+	bumpalo@3.20.2
+	bytemuck@1.25.0
+	bytemuck_derive@1.11.0
+	byteorder@1.5.0
+	cc@1.2.62
+	cfg-if@1.0.4
+	chacha20@0.10.1
+	chrono@0.4.45
+	clipper2@0.6.0
+	clipper2c-sys@0.2.0
+	core-foundation-sys@0.8.7
+	cpufeatures@0.3.0
+	crossbeam-deque@0.8.6
+	crossbeam-epoch@0.9.18
+	crossbeam-utils@0.8.21
+	crunchy@0.2.4
+	cty@0.2.2
+	deranged@0.5.8
+	earcut@0.4.11
+	either@1.17.0
+	equivalent@1.0.2
+	euclid@0.22.14
+	find-msvc-tools@0.1.9
+	foldhash@0.2.0
+	font-types@0.11.3
+	fontconfig-parser@0.5.8
+	fontdb@0.24.0
+	futures-core@0.3.32
+	futures-task@0.3.32
+	futures-util@0.3.32
+	getopts@0.2.24
+	getrandom@0.2.17
+	getrandom@0.4.3
+	glam@0.30.10
+	glam@0.31.1
+	glam@0.32.1
+	glam@0.33.5
+	hash32@0.3.1
+	hashbrown@0.16.1
+	hashbrown@0.17.1
+	heapless@0.8.0
+	heck@0.5.0
+	iana-time-zone-haiku@0.1.2
+	iana-time-zone@0.1.65
+	indexmap@2.14.0
+	inventory@0.3.24
+	is-macro@0.3.7
+	itertools@0.11.0
+	itertools@0.14.0
+	itoa@1.0.18
+	jobserver@0.1.35
+	js-sys@0.3.98
+	kurbo@0.13.1
+	lalrpop-util@0.20.2
+	libc@0.2.189
+	libm@0.2.16
+	libmimalloc-sys@0.1.49
+	log@0.4.33
+	maplit@1.0.2
+	matrixmultiply@0.3.10
+	memchr@2.8.0
+	memmap2@0.9.11
+	mimalloc@0.1.52
+	nalgebra-macros@0.3.0
+	nalgebra-sparse@0.12.0
+	nalgebra@0.35.0
+	ndarray@0.17.2
+	num-bigint@0.4.6
+	num-complex@0.4.6
+	num-conv@0.2.2
+	num-integer@0.1.46
+	num-rational@0.4.2
+	num-traits@0.2.19
+	num_enum@0.7.6
+	num_enum_derive@0.7.6
+	numpy@0.28.0
+	once_cell@1.21.4
+	ordered-float@5.3.0
+	phf@0.11.3
+	phf_codegen@0.11.3
+	phf_generator@0.11.3
+	phf_shared@0.11.3
+	pin-project-lite@0.2.17
+	pkg-config@0.3.33
+	polycool@0.4.0
+	portable-atomic-util@0.2.7
+	portable-atomic@1.13.1
+	powerfmt@0.2.0
+	ppv-lite86@0.2.21
+	proc-macro-crate@3.5.0
+	proc-macro2@1.0.106
+	pyo3-build-config@0.28.3
+	pyo3-ffi@0.28.3
+	pyo3-macros-backend@0.28.3
+	pyo3-macros@0.28.3
+	pyo3-stub-gen-derive@0.23.0
+	pyo3-stub-gen@0.23.0
+	pyo3@0.28.3
+	quote@1.0.45
+	r-efi@6.0.0
+	rand@0.10.2
+	rand@0.8.6
+	rand_chacha@0.3.1
+	rand_core@0.10.1
+	rand_core@0.6.4
+	rawpointer@0.2.1
+	rayon-core@1.13.0
+	rayon@1.12.0
+	read-fonts@0.39.2
+	regex-automata@0.4.16
+	regex-syntax@0.8.11
+	regex@1.13.1
+	rmp-serde@1.3.1
+	rmp@0.8.15
+	robust@1.2.0
+	roxmltree@0.20.0
+	roxmltree@0.21.1
+	rstar@0.13.0
+	rustc-hash@1.1.0
+	rustc-hash@2.1.2
+	rustpython-ast@0.4.0
+	rustpython-parser-core@0.4.0
+	rustpython-parser-vendored@0.4.0
+	rustpython-parser@0.4.0
+	rustversion@1.0.22
+	safe_arch@1.0.0
+	serde@1.0.229
+	serde_core@1.0.229
+	serde_derive@1.0.229
+	serde_json@1.0.151
+	serde_spanned@1.1.1
+	shlex@1.3.0
+	simba@0.10.0
+	siphasher@1.0.3
+	skrifa@0.42.1
+	slab@0.4.12
+	slotmap@1.1.1
+	smallvec@1.15.1
+	spade@2.15.1
+	stable_deref_trait@1.2.1
+	static_assertions@1.1.0
+	strum@0.28.0
+	strum_macros@0.28.0
+	svgtypes@0.16.1
+	swash@0.2.10
+	syn@2.0.117
+	syn@3.0.3
+	target-lexicon@0.13.5
+	thiserror-impl@2.0.20
+	thiserror@2.0.20
+	time-core@0.1.8
+	time@0.3.47
+	tiny-keccak@2.0.2
+	tinyvec@1.12.0
+	tinyvec_macros@0.1.1
+	toml@1.1.2+spec-1.1.0
+	toml_datetime@1.1.1+spec-1.1.0
+	toml_edit@0.25.11+spec-1.1.0
+	toml_parser@1.1.2+spec-1.1.0
+	toml_writer@1.1.1+spec-1.1.0
+	typenum@1.20.1
+	unic-char-property@0.9.0
+	unic-char-range@0.9.0
+	unic-common@0.9.0
+	unic-emoji-char@0.9.0
+	unic-ucd-ident@0.9.0
+	unic-ucd-version@0.9.0
+	unicode-ident@1.0.24
+	unicode-width@0.2.2
+	unicode_names2@1.3.0
+	unicode_names2_generator@1.3.0
+	version_check@0.9.5
+	wasi@0.11.1+wasi-snapshot-preview1
+	wasm-bindgen-macro-support@0.2.121
+	wasm-bindgen-macro@0.2.121
+	wasm-bindgen-shared@0.2.121
+	wasm-bindgen@0.2.121
+	wide@1.5.0
+	windows-core@0.62.2
+	windows-implement@0.60.2
+	windows-interface@0.59.3
+	windows-link@0.2.1
+	windows-result@0.4.1
+	windows-strings@0.5.1
+	winnow@1.0.3
+	yazi@0.2.1
+	zeno@0.3.3
+	zerocopy-derive@0.8.48
+	zerocopy@0.8.48
+	zmij@1.0.21
+	zstd-safe@7.2.4
+	zstd-sys@2.0.16+zstd.1.5.7
+	zstd@0.13.3
+"
+
+inherit cargo distutils-r1 pypi
+
+DESCRIPTION="2D/3D geometry library for CAD/CAM applications with Python bindings"
+HOMEPAGE="
+	https://github.com/barebaric/raygeo
+	https://pypi.org/project/raygeo/
+"
+SRC_URI+="
+	${CARGO_CRATE_URIS}
+"
+
+LICENSE="MIT"
+# Dependent crate licenses
+LICENSE+="
+	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 CC0-1.0 MIT
+	Unicode-3.0 Unicode-DFS-2016 ZLIB
+"
+SLOT="0"
+KEYWORDS="~amd64"
+
+RDEPEND="
+	dev-python/msgpack[${PYTHON_USEDEP}]
+	dev-python/numpy[${PYTHON_USEDEP}]
+"
+
+QA_FLAGS_IGNORED="usr/lib.*/py.*/site-packages/raygeo/.*\\.so"
+
+# pyo3 0.28 abi3-py311 wheel is built once per impl; keep it simple and
+# let distutils-r1 do per-impl builds
+export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+
+src_unpack() {
+	cargo_src_unpack
+}

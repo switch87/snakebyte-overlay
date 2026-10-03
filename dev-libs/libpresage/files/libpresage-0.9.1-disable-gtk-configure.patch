@@ -1,0 +1,12 @@
+diff --git a/configure b/configure
+index 3c1d8f2..b7a4c91 100755
+--- a/configure
++++ b/configure
+@@ -20321,7 +20321,7 @@ fi
+ 
+ 
+-APPS_SUBDIRS="gtk console"
++APPS_SUBDIRS="console"
+ 
+ ac_config_files="$ac_config_files Makefile
+ src/Makefile
