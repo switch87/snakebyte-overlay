@@ -12,7 +12,6 @@ hier, zodat de overlay niet afhangt van het syncen van andere overlays.
 
 | Pakket | Versie(s) | Omschrijving | Licentie | Opmerking |
 |---|---|---|---|---|
-| `app-crypt/eid-mw` | 5.1.26, 9999 | Middleware voor de Belgische elektronische identiteitskaart | LGPL-3 | ook in `::gentoo` (nieuwer) |
 | `dev-libs/libpresage` | 0.9.1 | Predictieve tekstinvoer (woordvoorspelling) | GPL-3 | |
 | `dev-python/PyMuPDF` | 1.27.2.3 | Python-bibliotheek voor PDF-bewerking | AGPL-3 | afhankelijkheid van rayforge |
 | `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP-sockets | MIT | afhankelijkheid van rayforge |
@@ -25,19 +24,13 @@ hier, zodat de overlay niet afhangt van het syncen van andere overlays.
 | `dev-python/raygeo` | 1.49.0 | 2D/3D-geometrie voor CAD/CAM (Rust + Python) | MIT | afhankelijkheid van rayforge |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG-parser | MIT | kopie uit `::guru`, afhankelijkheid van rayforge |
 | `dev-python/vtracer` | 0.6.15 | Raster-naar-vector (VTracer, Rust + Python) | MIT | afhankelijkheid van rayforge |
-| `kde-plasma/plasma-keyboard` | 0.1.0 | Virtueel toetsenbord voor Plasma | LGPL-2.1/LGPL-3, BSD | verouderd en defect (ongeldig atom `>=kde-frameworks/kcmutils:6`); gebruik de versie uit `::gentoo` |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (laser- en snijmodule H2D/H2C) — Windows-build via Wine | all-rights-reserved | zie hieronder |
 | `media-gfx/rayforge` | 1.11.0 | G-code-generator en besturing voor lasersnijders/-graveerders | MIT | |
 | `media-plugins/gst-plugins-rs` | 1.29.1 | GStreamer-plugins in Rust | LGPL-2.1+/MIT/Apache-2.0/MPL-2.0 | work in progress, nog geen Manifest |
 | `media-sound/noson-app` | 5.6.17 | SONOS-bediening voor Linux | GPL-3 | ook in `::guru` |
-| `media-sound/spotify` | 1.2.84 | Spotify-client | Spotify | ook in `::gentoo` (nieuwer) |
 | `media-video/stremio` | 1.0.0_beta12 | Stremio (nieuwe Rust/CEF-shell) | GPL-3 | |
 
-Daarnaast bevat `eclass/` een kopie van het verouderde `cmake-utils.eclass`
-(nodig voor `plasma-keyboard`).
-
-Alle ebuilds gebruiken EAPI 8 en staan op `~amd64` (behalve waar ze uit
-`::gentoo` overgenomen zijn).
+Alle ebuilds gebruiken EAPI 8 en staan op `~amd64`.
 
 ### `media-gfx/bambu-suite-bin`
 
