@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">wispr-flow-linux/wispr-flow-linux</remote-id>
+		<remote-id type="github">wispr-flow-linux/helper</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		Wispr Flow voice dictation, packaged from the unofficial wispr-flow-linux
+		port (which repackages the proprietary Wispr Flow app with a Linux
+		Electron runtime). The Linux helper for text injection and push-to-talk
+		is built from source here, with a fix for modifier keys (Ctrl/Alt)
+		staying logically pressed after a paste on Wayland.
+	</longdescription>
+</pkgmetadata>

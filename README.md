@@ -89,6 +89,19 @@ official Linux build into `/opt/snapmaker-luban`. It bundles Electron 15
 (Chromium 94, 2021), which no longer receives security updates. Command:
 `snapmaker-luban`.
 
+### Wispr Flow — `app-accessibility/wispr-flow-bin`
+
+Voice dictation for office work. Wispr Flow has no official Linux build; this
+package uses the unofficial
+[wispr-flow-linux](https://github.com/wispr-flow-linux/wispr-flow-linux) port
+(the proprietary app repackaged with a Linux Electron runtime). The port's
+Linux helper (text injection, push-to-talk) is **built from source** here,
+with a fix for [#123](https://github.com/wispr-flow-linux/wispr-flow-linux/issues/123):
+the prebuilt helper re-presses modifiers that are physically held during a
+paste on its own virtual keyboard and never releases them, so Ctrl/Alt stay
+logically pressed on Wayland. A udev rule gives the active session access to
+`/dev/uinput` and `/dev/input`. Run `wispr-flow --doctor` to check the setup.
+
 ### noson — `media-sound/noson-app`
 
 Controls SONOS speakers from Linux (Qt 6).
@@ -134,18 +147,29 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
+| `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
+| `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
 | `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |
+| `dev-python/anthropic` | 0.116.0 | Claude API client library | MIT | copy from `::guru` |
 | `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP sockets | MIT | rayforge dependency |
 | `dev-python/ezdxf` | 1.4.4 | Create and modify DXF drawings | MIT | copy from `::guru`; rayforge dependency |
+| `dev-python/http-snapshot` | 0.1.9 | HTTP snapshot testing | MIT | copy from `::guru`; anthropic test dependency |
+| `dev-python/httpx-aiohttp` | 0.2.0 | aiohttp transport for httpx | BSD | copy from `::guru`; anthropic test dependency |
+| `dev-python/jiter` | 0.16.0 | Fast iterable JSON parser (Rust) | MIT | copy from `::guru`; anthropic dependency |
 | `dev-python/mupdf` | 1.28.2 | Python bindings for MuPDF | AGPL-3 | PyMuPDF dependency; needs the same `app-text/mupdf` version |
 | `dev-python/pipcl` | 13 | Build helper for MuPDF/PyMuPDF | AGPL-3 | PyMuPDF dependency |
+| `dev-python/playwright` | 1.63.0 | Browser automation (bundled node driver) | Apache-2.0 | browsers live in `~/.cache/ms-playwright` |
 | `dev-python/py-slvs` | 1.0.6 | Python binding for the SolveSpace constraint solver | GPL-3 | |
 | `dev-python/pymupdf-fonts` | 1.0.5 | Optional fonts for PyMuPDF | OFL-1.1 | PyMuPDF dependency |
+| `dev-python/pyee` | 13.0.1 | Port of node's EventEmitter | MIT | playwright dependency (needs <14) |
+| `dev-python/pytest-base-url` | 2.1.0 | pytest plugin for base URLs | MPL-2.0 | pytest-playwright dependency |
+| `dev-python/pytest-playwright` | 0.9.0 | pytest plugin for Playwright | Apache-2.0 | |
 | `dev-python/pyvips` | 3.2.0 | Python binding for libvips | MIT | rayforge dependency |
 | `dev-python/raydriver` | 0.2.0 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
 | `dev-python/raygeo` | 1.59.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
 | `dev-python/ruida-pa` | 0.21.2 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
+| `dev-python/standardwebhooks` | 1.0.1 | Standard Webhooks reference library | MIT | copy from `::guru`; anthropic test dependency |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
@@ -156,7 +180,8 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 
-All ebuilds use EAPI 8.
+All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
+`::guru`, needed by `dev-python/anthropic`.
 
 ## Workflow
 

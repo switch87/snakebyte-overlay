@@ -1,0 +1,39 @@
+# Do not re-press modifiers that are physically held on another device after
+# injecting a chord: the key-downs land on the helper's own uinput keyboard
+# and are never released, leaving Ctrl/Alt logically stuck for the whole seat.
+# https://github.com/wispr-flow-linux/wispr-flow-linux/issues/123
+
+diff --git a/src/backend/uinput.rs b/src/backend/uinput.rs
+index 6890857..5c22e59 100644
+--- a/src/backend/uinput.rs
++++ b/src/backend/uinput.rs
+@@ -160,10 +160,6 @@ impl UInput {
+     /// `/dev/input` isn't readable (no `input` group / uaccess ACL), the held
+     /// set is empty and this degrades to a plain chord — see [`held_modifiers`].
+     pub fn chord(&mut self, key: u16, mods: &[u16]) -> Result<()> {
+-        let held = held_modifiers();
+-        for &m in &held {
+-            let _ = self.key(m, false);
+-        }
+         for &m in mods {
+             self.key(m, true)?;
+         }
+@@ -172,10 +168,6 @@ impl UInput {
+         for &m in mods.iter().rev() {
+             self.key(m, false)?;
+         }
+-        // Restore physically-held modifiers (reverse order). Best-effort.
+-        for &m in held.iter().rev() {
+-            let _ = self.key(m, true);
+-        }
+         Ok(())
+     }
+ }
+@@ -188,6 +180,7 @@ impl UInput {
+ /// device is readable. Reading `/dev/input` typically needs the `input` group
+ /// or the logind `uaccess` ACL; on sessions without it, the snapshot is simply
+ /// skipped (the common case at paste time has no modifier held anyway).
++#[allow(dead_code)]
+ pub fn held_modifiers() -> Vec<u16> {
+     use std::collections::BTreeSet;
+     // EVIOCGKEY(len) = _IOC(_IOC_READ=2, 'E'=0x45, 0x18, len). KEY_MAX=0x2ff ->
