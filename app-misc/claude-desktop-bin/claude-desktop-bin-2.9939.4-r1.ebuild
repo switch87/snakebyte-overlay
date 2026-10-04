@@ -49,6 +49,14 @@ src_install() {
 	cp -a usr "${ED}"/ || die
 	fowners root:root /usr/lib/claude-desktop/chrome-sandbox
 	fperms 4755 /usr/lib/claude-desktop/chrome-sandbox
+
+	if use cowork; then
+		# The Cowork VM only looks for UEFI firmware at Debian's paths
+		# (/usr/share/OVMF/OVMF_CODE{_4M,}.fd, VARS next to it); without
+		# them it reports the VM as unsupported.
+		dosym -r /usr/share/edk2/OvmfX64/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd
+		dosym -r /usr/share/edk2/OvmfX64/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd
+	fi
 }
 
 pkg_postinst() {

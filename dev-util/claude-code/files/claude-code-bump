@@ -1,0 +1,23 @@
+#!/bin/bash
+# Create an ebuild for the current release on Claude Code's "stable" channel.
+# Usage: bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump
+# Drop this package from snakebyte again once ::gentoo carries the version.
+
+set -euo pipefail
+
+PKGDIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+ver=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/stable)
+[[ ${ver} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version '${ver}'" >&2; exit 1; }
+
+new="${PKGDIR}/claude-code-${ver}.ebuild"
+if [[ -e ${new} ]]; then
+	echo "claude-code-${ver} already exists"
+	exit 0
+fi
+
+latest=$(ls "${PKGDIR}"/claude-code-*.ebuild | sort -V | tail -n1)
+cp "${latest}" "${new}"
+sudo ebuild "${new}" manifest
+echo "created ${new}"
+echo "install with: sudo emerge -av dev-util/claude-code"

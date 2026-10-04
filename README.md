@@ -94,11 +94,24 @@ official Linux build into `/opt/snapmaker-luban`. It bundles Electron 15
 Anthropic's official Claude Desktop for Linux (Chat, Cowork and Code),
 installed from the `.deb` in Anthropic's apt repository. The `cowork` USE
 flag (on by default) pulls in QEMU, OVMF and virtiofsd for the Cowork virtual
-machine. New versions are created with the bump script, which reads the apt
-index:
+machine. Cowork only looks for UEFI firmware at Debian's paths, so with
+`USE=cowork` the package links `/usr/share/OVMF/OVMF_{CODE,VARS}.fd` to the
+firmware from `sys-firmware/edk2-bin`. New versions are created with the bump
+script, which reads the apt index:
 
 ```sh
 bash /var/db/repos/snakebyte/app-misc/claude-desktop-bin/files/claude-desktop-bump
+```
+
+### Claude Code — `dev-util/claude-code`
+
+The `::gentoo` ebuild, bumped here to the current release on Claude Code's
+*stable* channel. Its `managed-settings.json` turns off the self-updater and
+the installation checks, so Claude Code never installs copies into the home
+directory. Drop this copy again once `::gentoo` catches up.
+
+```sh
+bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump
 ```
 
 ### Wispr Flow — `app-accessibility/wispr-flow-bin`
@@ -168,8 +181,9 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
-| `app-misc/claude-desktop-bin` | 2.9939.4 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
+| `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
+| `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
 | `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |
