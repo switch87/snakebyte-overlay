@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="cowork">Pull in QEMU, OVMF and virtiofsd for the Cowork tab's virtual machine</flag>
+	</use>
+	<longdescription lang="en">
+		Anthropic's official Claude Desktop for Linux (Chat, Cowork and Code),
+		installed from the .deb in Anthropic's apt repository.
+	</longdescription>
+</pkgmetadata>

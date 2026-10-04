@@ -89,6 +89,18 @@ official Linux build into `/opt/snapmaker-luban`. It bundles Electron 15
 (Chromium 94, 2021), which no longer receives security updates. Command:
 `snapmaker-luban`.
 
+### Claude Desktop — `app-misc/claude-desktop-bin`
+
+Anthropic's official Claude Desktop for Linux (Chat, Cowork and Code),
+installed from the `.deb` in Anthropic's apt repository. The `cowork` USE
+flag (on by default) pulls in QEMU, OVMF and virtiofsd for the Cowork virtual
+machine. New versions are created with the bump script, which reads the apt
+index:
+
+```sh
+bash /var/db/repos/snakebyte/app-misc/claude-desktop-bin/files/claude-desktop-bump
+```
+
 ### Wispr Flow — `app-accessibility/wispr-flow-bin`
 
 Voice dictation for office work. Wispr Flow has no official Linux build; this
@@ -133,8 +145,9 @@ echo 'media-gfx/rayforge ~amd64' >> /etc/portage/package.accept_keywords/snakeby
 emerge -av media-gfx/rayforge
 ```
 
-The closed-source packages (`bambu-suite-bin`, `lightburn-bin`,
-`lightburn-wine`) also need their license accepted:
+The closed-source packages (`bambu-suite-bin`, `claude-desktop-bin`,
+`lightburn-bin`, `lightburn-wine`, `wispr-flow-bin`) also need their license
+accepted:
 
 ```sh
 echo 'media-gfx/lightburn-bin all-rights-reserved' >> /etc/portage/package.license
@@ -147,6 +160,7 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
+| `app-misc/claude-desktop-bin` | 2.9939.4 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |

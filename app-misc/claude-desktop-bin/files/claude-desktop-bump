@@ -1,0 +1,25 @@
+#!/bin/bash
+# Create an ebuild for the newest official Claude Desktop .deb.
+# Usage: bash /var/db/repos/snakebyte/app-misc/claude-desktop-bin/files/claude-desktop-bump
+
+set -euo pipefail
+
+PKGDIR="$(cd "$(dirname "$0")/.." && pwd)"
+INDEX=https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64/Packages
+
+ver=$(curl -fsSL "${INDEX}" \
+	| awk '/^Package: claude-desktop$/{p=1;next} /^Package:/{p=0} p&&/^Version:/{print $2}' \
+	| sort -V | tail -n1)
+[[ -n ${ver} ]] || { echo "could not determine the latest version" >&2; exit 1; }
+
+new="${PKGDIR}/claude-desktop-bin-${ver}.ebuild"
+if [[ -e ${new} ]]; then
+	echo "claude-desktop-bin-${ver} already exists"
+	exit 0
+fi
+
+latest=$(ls "${PKGDIR}"/claude-desktop-bin-*.ebuild | sort -V | tail -n1)
+cp "${latest}" "${new}"
+sudo ebuild "${new}" manifest
+echo "created ${new}"
+echo "install with: sudo emerge -av app-misc/claude-desktop-bin"
