@@ -1,8 +1,8 @@
-# gentoo-overlay
+# snakebyte
 
-Gert Pellin's personal Gentoo overlay: ebuilds for software that is not in
-`::gentoo` (or not in the wanted version), used and tested on an amd64 system
-running KDE Plasma.
+`snakebyte` is Gert Pellin's personal Gentoo overlay: ebuilds for software
+that is not in `::gentoo` (or not in the wanted version), used and tested on
+an amd64 system running KDE Plasma.
 
 The overlay is **self-contained**: when a package depends on something that
 only exists in another overlay (e.g. `::guru`), a copy of that ebuild lives
@@ -28,7 +28,7 @@ Tested with `app-emulation/wine-vanilla-11.0`. The download URL contains an
 upload timestamp, so new versions are created with the bump script:
 
 ```sh
-bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
+bash /var/db/repos/snakebyte/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 ```
 
 ### LightBurn — `media-gfx/lightburn-bin` and `media-gfx/lightburn-wine`
@@ -58,7 +58,7 @@ LightBurn under Wine.
 New Windows releases are picked up from LightBurn's `Release.json`:
 
 ```sh
-bash /var/db/repos/local/media-gfx/lightburn-wine/files/lightburn-wine-bump
+bash /var/db/repos/snakebyte/media-gfx/lightburn-wine/files/lightburn-wine-bump
 ```
 
 ### Rayforge — `media-gfx/rayforge`
@@ -99,24 +99,24 @@ The repository is private, so syncing goes over SSH with a key that has access
 to GitHub.
 
 ```ini
-# /etc/portage/repos.conf/local.conf
-[local]
-location = /var/db/repos/local
+# /etc/portage/repos.conf/snakebyte.conf
+[snakebyte]
+location = /var/db/repos/snakebyte
 masters = gentoo
 sync-type = git
-sync-uri = git@github.com:switch87/gentoo-overlay.git
+sync-uri = git@github.com:switch87/snakebyte.git
 auto-sync = no
 priority = 9999
 ```
 
 ```sh
-git clone git@github.com:switch87/gentoo-overlay.git /var/db/repos/local
+git clone git@github.com:switch87/snakebyte.git /var/db/repos/snakebyte
 ```
 
 All packages are keyworded `~amd64`; accept them per package, e.g.:
 
 ```sh
-echo 'media-gfx/rayforge ~amd64' >> /etc/portage/package.accept_keywords/local
+echo 'media-gfx/rayforge ~amd64' >> /etc/portage/package.accept_keywords/snakebyte
 emerge -av media-gfx/rayforge
 ```
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Create an ebuild for the newest Windows release of LightBurn.
-# Usage: bash /var/db/repos/local/media-gfx/lightburn-wine/files/lightburn-wine-bump
+# Usage: bash /var/db/repos/snakebyte/media-gfx/lightburn-wine/files/lightburn-wine-bump
 
 set -euo pipefail
 

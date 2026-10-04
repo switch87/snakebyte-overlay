@@ -1,6 +1,6 @@
 #!/bin/bash
 # Create an ebuild for the newest Bambu Suite release in the local overlay.
-# Usage: bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
+# Usage: bash /var/db/repos/snakebyte/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 
 set -euo pipefail
 
