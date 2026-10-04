@@ -1,70 +1,93 @@
-# gentoo-overlay (`::local`)
+# gentoo-overlay
 
-Gert Pellin's persoonlijke Gentoo-overlay: ebuilds voor software die niet (of
-niet in de gewenste versie) in `::gentoo` zit, gebruikt en getest op een
-amd64-systeem met KDE Plasma.
+Gert Pellin's personal Gentoo overlay: ebuilds for software that is not in
+`::gentoo` (or not in the wanted version), used and tested on an amd64 system
+running KDE Plasma.
 
-Deze overlay is **self-contained**: hangt een pakket af van iets dat alleen in
-een andere overlay (bv. `::guru`) bestaat, dan staat een kopie van die ebuild
-hier, zodat de overlay niet afhangt van het syncen van andere overlays.
+The overlay is **self-contained**: when a package depends on something that
+only exists in another overlay (e.g. `::guru`), a copy of that ebuild lives
+here, so this overlay never depends on other overlays being synced.
 
-## Pakketten
+## Applications
 
-| Pakket | Versie(s) | Omschrijving | Licentie | Opmerking |
-|---|---|---|---|---|
-| `dev-libs/libpresage` | 0.9.1 | Predictieve tekstinvoer (woordvoorspelling) | GPL-3 | |
-| `dev-python/PyMuPDF` | 1.28.2 | Python-bibliotheek voor PDF-bewerking | AGPL-3 | afhankelijkheid van rayforge |
-| `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP-sockets | MIT | afhankelijkheid van rayforge |
-| `dev-python/ezdxf` | 1.4.4 | DXF-tekeningen maken en bewerken | MIT | kopie uit `::guru`, afhankelijkheid van rayforge |
-| `dev-python/mupdf` | 1.28.2 | Python-bindings voor MuPDF | AGPL-3 | afhankelijkheid van PyMuPDF; vereist exact dezelfde versie van `app-text/mupdf` |
-| `dev-python/pipcl` | 13 | Build-helper voor MuPDF/PyMuPDF | AGPL-3 | afhankelijkheid van PyMuPDF |
-| `dev-python/py-slvs` | 1.0.6 | Python-binding voor de SolveSpace constraint solver | GPL-3 | |
-| `dev-python/pymupdf-fonts` | 1.0.5 | Optionele fonts voor PyMuPDF | OFL-1.1 | afhankelijkheid van PyMuPDF |
-| `dev-python/pyvips` | 3.2.0 | Python-binding voor libvips | MIT | afhankelijkheid van rayforge |
-| `dev-python/raydriver` | 0.2.0 | Machine-drivers voor rayforge (Rust + Python) | MIT | afhankelijkheid van rayforge |
-| `dev-python/raygeo` | 1.59.0 | 2D/3D-geometrie voor CAD/CAM (Rust + Python) | MIT | afhankelijkheid van rayforge |
-| `dev-python/ruida-pa` | 0.21.2 | Ruida-protocolanalyse en -driver | MIT | afhankelijkheid van rayforge; bokeh/textual optioneel |
-| `dev-python/svgelements` | 1.9.6-r1 | SVG-parser | MIT | kopie uit `::guru`, afhankelijkheid van rayforge |
-| `dev-python/vtracer` | 0.6.15 | Raster-naar-vector (VTracer, Rust + Python) | MIT | afhankelijkheid van rayforge |
-| `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (laser- en snijmodule H2D/H2C) — Windows-build via Wine | all-rights-reserved | zie hieronder |
-| `media-gfx/rayforge` | 1.12.0 | G-code-generator en besturing voor lasersnijders/-graveerders | MIT | |
-| `media-sound/noson-app` | 5.7.5 | SONOS-bediening voor Linux (Qt6) | GPL-3 | ook in `::guru` (ouder) |
-| `media-video/stremio` | 1.2.1 | Stremio (nieuwe GTK4/WebKitGTK-shell) | GPL-3 | gepatcht om met stabiele GTK 4.20 / libadwaita 1.8 te bouwen |
+### Bambu Suite — `media-gfx/bambu-suite-bin`
 
-Alle ebuilds gebruiken EAPI 8 en staan op `~amd64`.
+Bambu Lab's software for the laser and cutting modules of the H2D/H2C. Bambu
+Lab only ships it for Windows and macOS, so this package runs the Windows
+build under Wine:
 
-### `media-gfx/bambu-suite-bin`
+- the Inno Setup installer is unpacked with `innoextract` into
+  `/opt/bambu-suite` at emerge time;
+- the `bambu-suite` launcher creates a per-user Wine prefix in
+  `~/.local/share/bambu-suite/prefix` on first start (Windows 11 mode,
+  VC++ runtime and fonts from the installer);
+- reset the prefix by removing that directory; use another one with
+  `BAMBU_SUITE_WINEPREFIX=/path bambu-suite`.
 
-Bambu Lab levert Bambu Suite alleen voor Windows en macOS. De ebuild pakt de
-Windows-installer (Inno Setup) met `innoextract` uit naar `/opt/bambu-suite`;
-de launcher `bambu-suite` maakt per gebruiker een Wine-prefix aan in
-`~/.local/share/bambu-suite/prefix` (Windows 11-modus, VC++-runtime uit de
-installer, bijgeleverde fonts). Getest met `app-emulation/wine-vanilla-11.0`.
-
-- Prefix resetten: verwijder `~/.local/share/bambu-suite/prefix`.
-- Andere prefix: `BAMBU_SUITE_WINEPREFIX=/pad bambu-suite`.
-- De licentie moet expliciet geaccepteerd worden:
-  `echo 'media-gfx/bambu-suite-bin all-rights-reserved' >> /etc/portage/package.license`
-
-**Nieuwe versie:** de download-URL bevat een tijdstempel dat niet uit het
-versienummer volgt. Het bump-script zoekt de nieuwste link op en maakt de
-ebuild + Manifest aan:
+Tested with `app-emulation/wine-vanilla-11.0`. The download URL contains an
+upload timestamp, so new versions are created with the bump script:
 
 ```sh
 bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 ```
 
-### `media-gfx/rayforge` en de PDF-keten
+### LightBurn — `media-gfx/lightburn-bin` and `media-gfx/lightburn-wine`
 
-`dev-python/mupdf` bouwt tegen de systeem-MuPDF en vereist exact dezelfde
-versie (`~app-text/mupdf-${PV}`). Update `app-text/mupdf`, `dev-python/mupdf`
-en `dev-python/PyMuPDF` daarom altijd samen, en pin `app-text/mupdf` op die
-versie in `package.accept_keywords` (bv. `=app-text/mupdf-1.28.2* ~amd64`).
+Layout and control software for laser cutters. LightBurn dropped Linux after
+1.7.08, so there are two packages that can be installed side by side:
 
-## Installatie
+- **`lightburn-bin`** (1.7.08) — the last native Linux release, installed into
+  `/opt/lightburn` with its bundled Qt 5 (Qt 5 is no longer in `::gentoo`).
+  Pulls in `dev-libs/openssl-compat:1.1.1`, which the bundled Qt needs for
+  TLS (license activation, update checks). Command: `lightburn`.
+- **`lightburn-wine`** (2.x) — the current Windows release under Wine, with a
+  per-user prefix in `~/.local/share/lightburn-wine/prefix` (Windows 10 mode,
+  VC++ runtimes from the installer). On first start the settings of the native
+  version (`~/.config/LightBurn/prefs.ini`) are copied into the prefix.
+  Command: `lightburn-wine`.
 
-De repository is privé, dus syncen gaat via SSH met een sleutel die toegang
-heeft tot GitHub.
+LightBurn 2.x enumerates cameras through WinRT APIs that Wine does not
+implement and crashes at start-up because of it. `lightburn-wine` builds a
+small stub DLL (`files/winrt-capture-stub.c`) that implements
+`MediaFrameSourceGroup` and `DeviceInformation` as "no cameras present" and
+registers it in the prefix. As a result, **camera support is not available**
+in the Wine version. LightBurn 2.x also needs a license whose update period
+covers the installed version. LightBurn Software does not support running
+LightBurn under Wine.
+
+New Windows releases are picked up from LightBurn's `Release.json`:
+
+```sh
+bash /var/db/repos/local/media-gfx/lightburn-wine/files/lightburn-wine-bump
+```
+
+### Rayforge — `media-gfx/rayforge`
+
+G-code generator and control software for laser cutters and engravers. Most of
+the `dev-python/*` packages in this overlay are its dependencies, including
+the Rust-based `raygeo`, `raydriver` and `vtracer`.
+
+`dev-python/mupdf` builds against the system MuPDF and requires exactly the
+same version (`~app-text/mupdf-${PV}`). Always update `app-text/mupdf`,
+`dev-python/mupdf` and `dev-python/PyMuPDF` together, and pin `app-text/mupdf`
+to that version in `package.accept_keywords` (e.g.
+`=app-text/mupdf-1.28.2* ~amd64`).
+
+### Stremio — `media-video/stremio`
+
+The new GTK 4 / WebKitGTK based Stremio shell, built from source. Upstream
+asks for GTK 4.22 and libadwaita 1.9, but uses nothing newer than GTK 4.20 and
+libadwaita 1.8; the ebuild lowers those API levels so it builds against stable
+GTK. Needs `net-libs/webkit-gtk:6` and `media-video/mpv[libmpv]`.
+
+### noson — `media-sound/noson-app`
+
+Controls SONOS speakers from Linux (Qt 6).
+
+## Installation
+
+The repository is private, so syncing goes over SSH with a key that has access
+to GitHub.
 
 ```ini
 # /etc/portage/repos.conf/local.conf
@@ -81,28 +104,65 @@ priority = 9999
 git clone git@github.com:switch87/gentoo-overlay.git /var/db/repos/local
 ```
 
-Zet daarna de gewenste pakketten op `~amd64`, bv.:
+All packages are keyworded `~amd64`; accept them per package, e.g.:
 
 ```sh
 echo 'media-gfx/rayforge ~amd64' >> /etc/portage/package.accept_keywords/local
 emerge -av media-gfx/rayforge
 ```
 
-## Werkwijze
+The closed-source packages (`bambu-suite-bin`, `lightburn-bin`,
+`lightburn-wine`) also need their license accepted:
 
-- Nieuwe ebuilds eerst in een staging-overlay testen (`ebuild … manifest`,
-  `ebuild … clean install`, `pkgcheck scan`, `emerge -p`), daarna hierheen.
-- Na elke wijziging aan een ebuild of `files/`: `ebuild <pkg>.ebuild manifest`.
-- `metadata/md5-cache/` wordt niet in git bijgehouden.
-- Committen en pushen naar `main`.
+```sh
+echo 'media-gfx/lightburn-bin all-rights-reserved' >> /etc/portage/package.license
+```
 
-## Bijdragers
+To use a laser over USB-serial, your user must be able to open the serial
+device, e.g. `usermod -aG dialout <user>`.
 
-- **Gert Pellin** (`switch87`) — onderhouder — pellingert@gmail.com
+## Packages
 
-## Licentie
+| Package | Version | Description | License | Notes |
+|---|---|---|---|---|
+| `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
+| `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |
+| `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP sockets | MIT | rayforge dependency |
+| `dev-python/ezdxf` | 1.4.4 | Create and modify DXF drawings | MIT | copy from `::guru`; rayforge dependency |
+| `dev-python/mupdf` | 1.28.2 | Python bindings for MuPDF | AGPL-3 | PyMuPDF dependency; needs the same `app-text/mupdf` version |
+| `dev-python/pipcl` | 13 | Build helper for MuPDF/PyMuPDF | AGPL-3 | PyMuPDF dependency |
+| `dev-python/py-slvs` | 1.0.6 | Python binding for the SolveSpace constraint solver | GPL-3 | |
+| `dev-python/pymupdf-fonts` | 1.0.5 | Optional fonts for PyMuPDF | OFL-1.1 | PyMuPDF dependency |
+| `dev-python/pyvips` | 3.2.0 | Python binding for libvips | MIT | rayforge dependency |
+| `dev-python/raydriver` | 0.2.0 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/raygeo` | 1.59.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/ruida-pa` | 0.21.2 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
+| `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
+| `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
+| `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
+| `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
+| `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
+| `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
+| `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
+| `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 
-De ebuilds, patches en scripts in deze repository vallen onder de
-[GNU General Public License v2](LICENSE), net als de Gentoo-tree. De software
-die ze installeren valt onder de eigen licentie van elk pakket (zie de
-`LICENSE`-variabele in de ebuild en de tabel hierboven).
+All ebuilds use EAPI 8.
+
+## Workflow
+
+- Test new ebuilds in a staging overlay first (`ebuild … manifest`,
+  `ebuild … clean install`, `pkgcheck scan`, `emerge -p`), then copy them here.
+- After every change to an ebuild or its `files/`: `ebuild <pkg>.ebuild manifest`.
+- `metadata/md5-cache/` is not tracked in git.
+- Commit and push to `main`.
+
+## Contributors
+
+- **Gert Pellin** (`switch87`) — maintainer — pellingert@gmail.com
+
+## License
+
+The ebuilds, patches and scripts in this repository are licensed under the
+[GNU General Public License v2](LICENSE), like the Gentoo tree. The software
+they install is covered by its own license (see the `LICENSE` variable in each
+ebuild and the table above).

@@ -1,0 +1,23 @@
+#!/bin/bash
+# Create an ebuild for the newest Windows release of LightBurn.
+# Usage: bash /var/db/repos/local/media-gfx/lightburn-wine/files/lightburn-wine-bump
+
+set -euo pipefail
+
+PKGDIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+ver=$(curl -fsSL https://files.release.lightburnsoftware.com/LightBurn/cv_private/Release.json \
+	| python3 -c 'import json,sys; print(json.load(sys.stdin)["win64"]["ver"])')
+[[ -n ${ver} ]] || { echo "could not determine the latest version" >&2; exit 1; }
+
+new="${PKGDIR}/lightburn-wine-${ver}.ebuild"
+if [[ -e ${new} ]]; then
+	echo "lightburn-wine-${ver} already exists"
+	exit 0
+fi
+
+latest=$(ls "${PKGDIR}"/lightburn-wine-*.ebuild | sort -V | tail -n1)
+cp "${latest}" "${new}"
+sudo ebuild "${new}" manifest
+echo "created ${new}"
+echo "install with: sudo emerge -av media-gfx/lightburn-wine"

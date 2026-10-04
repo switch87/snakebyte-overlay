@@ -1,6 +1,6 @@
 #!/bin/bash
 # Create an ebuild for the newest Bambu Suite release in the local overlay.
-# Usage: sudo bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
+# Usage: bash /var/db/repos/local/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 
 set -euo pipefail
 
@@ -21,6 +21,6 @@ fi
 
 latest=$(ls "${PKGDIR}"/bambu-suite-bin-*.ebuild | sort -V | tail -n1)
 sed -E "s/^BUILD_STAMP=.*/BUILD_STAMP=\"${stamp}\"/" "${latest}" > "${new}"
-ebuild "${new}" manifest
+sudo ebuild "${new}" manifest
 echo "created ${new}"
 echo "install with: emerge -av media-gfx/bambu-suite-bin"

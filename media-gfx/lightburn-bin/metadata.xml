@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<longdescription lang="en">
+		LightBurn is layout, editing and control software for laser cutters.
+		Version 1.7.08 is the last release with a Linux build; this package
+		installs that build (with its bundled Qt 5) into /opt/lightburn.
+	</longdescription>
+</pkgmetadata>

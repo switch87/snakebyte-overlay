@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<longdescription lang="en">
+		LightBurn is layout, editing and control software for laser cutters.
+		LightBurn 2.x is only released for Windows and macOS; this package
+		unpacks the Windows installer into /opt/lightburn-wine and runs it
+		under Wine with a per-user prefix. A small stub DLL replaces the
+		WinRT camera enumeration classes Wine does not implement, so camera
+		support is unavailable.
+	</longdescription>
+</pkgmetadata>

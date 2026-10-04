@@ -1,0 +1,72 @@
+#!/bin/bash
+# Launcher for the Windows build of LightBurn running under Wine.
+# The program files live read-only in /opt/lightburn-wine; every user gets
+# a private Wine prefix that is prepared on first start.
+
+set -e
+
+APPDIR=/opt/lightburn-wine
+PREFIX_VERSION=1
+
+# Wine on Gentoo is slotted; eselect-wine provides the active version here
+export PATH="/etc/eselect/wine/bin:${PATH}"
+
+export WINEPREFIX="${LIGHTBURN_WINEPREFIX:-${XDG_DATA_HOME:-${HOME}/.local/share}/lightburn-wine/prefix}"
+export WINEARCH=win64
+export WINEDEBUG="${WINEDEBUG:--all}"
+# don't let Wine create .desktop entries/file associations for the prefix
+export WINEDLLOVERRIDES="winemenubuilder.exe=d${WINEDLLOVERRIDES:+;${WINEDLLOVERRIDES}}"
+# QtWebEngine (Chromium) cannot use its sandbox under Wine
+export QTWEBENGINE_DISABLE_SANDBOX=1
+export QTWEBENGINE_CHROMIUM_FLAGS="${QTWEBENGINE_CHROMIUM_FLAGS:---no-sandbox --disable-gpu}"
+
+notify() {
+	echo "lightburn-wine: $*" >&2
+	command -v notify-send >/dev/null && notify-send -a LightBurn LightBurn "$*" || true
+}
+
+prepare_prefix() {
+	notify "Wine-prefix wordt voorbereid in ${WINEPREFIX} (eenmalig, even geduld)..."
+	mkdir -p "${WINEPREFIX}"
+	wineboot --init
+	wineserver --wait
+
+	wine winecfg /v win10
+	wineserver --wait
+
+	# Visual C++ runtimes shipped inside the upstream installer
+	local r
+	for r in vcredist_2010_x64.exe vcredist_2015-2022_x64.exe; do
+		wine "${APPDIR}/redist/${r}" /q /norestart || true
+		wineserver --wait
+	done
+
+	# Wine lacks the WinRT camera enumeration classes LightBurn uses at
+	# start-up; register a stub that reports "no cameras" (see
+	# winrt-capture-stub.c) instead of letting LightBurn crash.
+	local class key dll="Z:${APPDIR//\//\\}\\winrt-capture-stub.dll"
+	for class in Windows.Media.Capture.Frames.MediaFrameSourceGroup \
+			Windows.Devices.Enumeration.DeviceInformation; do
+		key="HKLM\\Software\\Microsoft\\WindowsRuntime\\ActivatableClassId\\${class}"
+		wine reg add "${key}" /v DllPath /t REG_SZ /d "${dll}" /f
+		wine reg add "${key}" /v ActivationType /t REG_DWORD /d 0 /f
+		wine reg add "${key}" /v Threading /t REG_DWORD /d 0 /f
+	done
+	wineserver --wait
+
+	# take over the settings of a native LightBurn 1.x on first start
+	local prefs="${WINEPREFIX}/drive_c/users/${USER}/AppData/Local/LightBurn"
+	if [[ ! -e ${prefs}/prefs.ini && -e ${HOME}/.config/LightBurn/prefs.ini ]]; then
+		mkdir -p "${prefs}"
+		cp "${HOME}/.config/LightBurn/prefs.ini" "${prefs}/" || true
+	fi
+
+	echo "${PREFIX_VERSION}" > "${WINEPREFIX}/.lightburn-wine-prefix"
+}
+
+if [[ "$(cat "${WINEPREFIX}/.lightburn-wine-prefix" 2>/dev/null)" != "${PREFIX_VERSION}" ]]; then
+	prepare_prefix
+fi
+
+cd "${APPDIR}/app"
+exec wine "${APPDIR}/app/LightBurn.exe" "$@"
