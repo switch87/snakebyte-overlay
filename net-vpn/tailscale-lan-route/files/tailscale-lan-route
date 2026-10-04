@@ -1,0 +1,46 @@
+#!/bin/sh
+# Let directly connected networks win over subnet routes accepted from
+# Tailscale (--accept-routes). Tailscale puts those routes in table 52 behind
+# rules at priority 5210-5270, so on a LAN that a subnet router also
+# advertises, traffic to LAN hosts goes through the subnet router (NATed) and
+# the hosts can't connect back. A rule just before them sends traffic to the
+# main table, but only for routes more specific than the default route
+# (suppress_prefixlength 0), so away from that LAN Tailscale still applies.
+# See https://github.com/tailscale/tailscale/issues/7947
+
+PRIORITY=${PRIORITY:-5200}
+
+family() {
+	case $1 in
+		*:*) echo -6 ;;
+		*) echo -4 ;;
+	esac
+}
+
+case $1 in
+	start)
+		"$0" stop
+		if [ -z "${LAN_PREFIXES}" ]; then
+			ip -4 rule add lookup main suppress_prefixlength 0 priority "${PRIORITY}" || exit 1
+			ip -6 rule add lookup main suppress_prefixlength 0 priority "${PRIORITY}" || exit 1
+		else
+			for prefix in ${LAN_PREFIXES}; do
+				ip $(family "${prefix}") rule add to "${prefix}" lookup main \
+					suppress_prefixlength 0 priority "${PRIORITY}" || exit 1
+			done
+		fi
+		;;
+	stop)
+		for f in -4 -6; do
+			while ip ${f} rule del priority "${PRIORITY}" 2>/dev/null; do :; done
+		done
+		;;
+	status)
+		ip -4 rule show priority "${PRIORITY}"
+		ip -6 rule show priority "${PRIORITY}"
+		;;
+	*)
+		echo "usage: ${0##*/} start|stop|status" >&2
+		exit 2
+		;;
+esac

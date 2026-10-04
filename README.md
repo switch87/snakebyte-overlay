@@ -139,6 +139,22 @@ alive for Odoo. The package installs the upstream Debian bookworm build into
 
 Controls SONOS speakers from Linux (Qt 6).
 
+### Tailscale on your own LAN — `net-vpn/tailscale-lan-route`
+
+**Fix for Tailscale `--accept-routes` on Linux.** When a node (often the home
+router) advertises your LAN as a subnet route, Linux sends traffic to your
+*own* LAN through that subnet router, NATed, even while you are at home.
+Devices on the LAN then can't connect back. A typical symptom is **KDE Connect
+transfers from the PC to the phone stuck at 0%**; another is `ip route get
+<LAN-IP>` showing `dev tailscale0 table 52`. The package adds a policy rule
+(`lookup main suppress_prefixlength 0`, priority 5200) so that directly
+connected networks win. Away from home Tailscale's routes still apply. It
+also keeps systemd-networkd from deleting the rule. After installing, run
+`systemctl enable --now tailscale-lan-route.service`.
+
+Full explanation, diagnosis, configuration and a non-Gentoo version:
+[docs/tailscale-lan-route.md](docs/tailscale-lan-route.md).
+
 ## Installation
 
 With `app-eselect/eselect-repository`:
@@ -216,6 +232,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
+| `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |
 
 All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
 `::guru`, needed by `dev-python/anthropic`.

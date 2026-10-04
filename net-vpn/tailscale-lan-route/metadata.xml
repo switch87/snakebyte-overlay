@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">switch87/snakebyte-overlay</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		With --accept-routes, Tailscale on Linux routes traffic to a LAN through a
+		subnet router even when the machine is on that LAN itself. LAN hosts then
+		see the subnet router as the source (NAT) and cannot connect back, which
+		breaks e.g. KDE Connect file transfers. This package adds a policy routing
+		rule just before Tailscale's rules so that directly connected networks
+		win, while Tailscale's routes still apply away from that LAN.
+	</longdescription>
+</pkgmetadata>

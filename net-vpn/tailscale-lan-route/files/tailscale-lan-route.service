@@ -1,0 +1,16 @@
+[Unit]
+Description=Prefer directly connected networks over Tailscale subnet routes
+Documentation=https://github.com/tailscale/tailscale/issues/7947
+Wants=network-pre.target
+After=network-pre.target systemd-networkd.service
+Before=network.target tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/conf.d/tailscale-lan-route
+ExecStart=/usr/libexec/tailscale-lan-route start
+ExecStop=/usr/libexec/tailscale-lan-route stop
+
+[Install]
+WantedBy=multi-user.target

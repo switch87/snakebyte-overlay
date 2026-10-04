@@ -1,0 +1,7 @@
+# Space-separated prefixes (IPv4 and/or IPv6) for which a directly connected
+# route wins over Tailscale. Empty: every route in the main table that is
+# more specific than the default route wins (recommended).
+#LAN_PREFIXES="192.168.1.0/24"
+
+# Rule priority; must be lower than Tailscale's rules (5210 and up).
+#PRIORITY=5200
