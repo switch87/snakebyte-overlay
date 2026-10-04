@@ -104,13 +104,13 @@ to GitHub.
 location = /var/db/repos/snakebyte
 masters = gentoo
 sync-type = git
-sync-uri = git@github.com:switch87/snakebyte.git
+sync-uri = git@github.com:switch87/snakebyte-overlay.git
 auto-sync = no
 priority = 9999
 ```
 
 ```sh
-git clone git@github.com:switch87/snakebyte.git /var/db/repos/snakebyte
+git clone git@github.com:switch87/snakebyte-overlay.git /var/db/repos/snakebyte
 ```
 
 All packages are keyworded `~amd64`; accept them per package, e.g.:
