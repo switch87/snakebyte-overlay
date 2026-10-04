@@ -141,22 +141,22 @@ Controls SONOS speakers from Linux (Qt 6).
 
 ## Installation
 
-The repository is private, so syncing goes over SSH with a key that has access
-to GitHub.
+With `app-eselect/eselect-repository`:
+
+```sh
+eselect repository add snakebyte git https://github.com/switch87/snakebyte-overlay.git
+emaint sync -r snakebyte
+```
+
+Or by hand:
 
 ```ini
 # /etc/portage/repos.conf/snakebyte.conf
 [snakebyte]
 location = /var/db/repos/snakebyte
-masters = gentoo
 sync-type = git
-sync-uri = git@github.com:switch87/snakebyte-overlay.git
-auto-sync = no
-priority = 9999
-```
-
-```sh
-git clone git@github.com:switch87/snakebyte-overlay.git /var/db/repos/snakebyte
+sync-uri = https://github.com/switch87/snakebyte-overlay.git
+auto-sync = yes
 ```
 
 All packages are keyworded `~amd64`; accept them per package, e.g.:
