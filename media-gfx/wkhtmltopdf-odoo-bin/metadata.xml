@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">wkhtmltopdf/packaging</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		For Odoo users: wkhtmltopdf/wkhtmltoimage 0.12.6.1 "with patched Qt",
+		the build Odoo requires for PDF reports (headers, footers, page
+		numbering). The project itself is archived; this release is kept around
+		for Odoo. Installed from the upstream Debian bookworm package; it links
+		only against libraries provided by ::gentoo.
+	</longdescription>
+</pkgmetadata>
