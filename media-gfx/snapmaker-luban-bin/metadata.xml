@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">Snapmaker/Luban</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		Snapmaker Luban is the 3-in-1 software (3D printing, laser engraving
+		and cutting, CNC carving) for Snapmaker machines. This package installs
+		the official Linux build, which bundles Electron, into
+		/opt/snapmaker-luban.
+	</longdescription>
+</pkgmetadata>

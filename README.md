@@ -80,6 +80,15 @@ asks for GTK 4.22 and libadwaita 1.9, but uses nothing newer than GTK 4.20 and
 libadwaita 1.8; the ebuild lowers those API levels so it builds against stable
 GTK. Needs `net-libs/webkit-gtk:6` and `media-video/mpv[libmpv]`.
 
+### Snapmaker Luban — `media-gfx/snapmaker-luban-bin`
+
+The 3-in-1 software (3D printing, laser, CNC) for Snapmaker machines. Luban
+is open source (AGPL-3), but building the Electron app from source would need
+hundreds of npm packages fetched at build time, so this package installs the
+official Linux build into `/opt/snapmaker-luban`. It bundles Electron 15
+(Chromium 94, 2021), which no longer receives security updates. Command:
+`snapmaker-luban`.
+
 ### noson — `media-sound/noson-app`
 
 Controls SONOS speakers from Linux (Qt 6).
@@ -142,6 +151,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
+| `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
