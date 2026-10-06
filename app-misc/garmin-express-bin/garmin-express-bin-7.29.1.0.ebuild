@@ -87,11 +87,10 @@ pkg_postinst() {
 	elog "(.NET 4.8 + Garmin Express itself; takes 10-20 minutes, once)."
 	elog "Override with GARMIN_EXPRESS_WINEPREFIX; remove that directory to reset."
 	elog
-	elog "Device detection under Wine works for Garmin devices that show up as a"
-	elog "USB drive (bike computers, older GPS units/watches): they are mounted by"
-	elog "the desktop and appear as a Wine drive. Recent watches that connect via"
-	elog "MTP are NOT visible to Wine; update those through the Garmin Connect"
-	elog "phone app instead."
+	ewarn "Device detection does NOT work under Wine: Express finds devices via the"
+	ewarn "Windows USB stack, which Wine lacks. Even a USB-mass-storage Edge 530,"
+	ewarn "mapped as a Wine drive, is not found (tested 2026-10-06). Use the Garmin"
+	ewarn "Connect phone app for firmware; copy OSM gmapsupp.img maps by hand."
 }
 
 pkg_postrm() {
