@@ -1,0 +1,3 @@
+# Garmin devices (USB vendor 091e): accessible to the logged-in user, so
+# Garmin Express under Wine (and other tools) can talk to them.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="091e", TAG+="uaccess"

@@ -1,0 +1,68 @@
+#!/bin/bash
+# Launcher for the Windows build of Garmin Express running under Wine.
+# The installer and its runtimes live read-only in /opt/garmin-express;
+# every user gets a private Wine prefix that is prepared on first start
+# (and again when the package installs a newer Garmin Express).
+
+set -e
+
+APPDIR=/opt/garmin-express
+PREFIX_VERSION=1
+APP_VERSION=$(cat "${APPDIR}/version")
+
+# Wine on Gentoo is slotted; eselect-wine provides the active version here
+export PATH="/etc/eselect/wine/bin:${PATH}"
+
+export WINEPREFIX="${GARMIN_EXPRESS_WINEPREFIX:-${XDG_DATA_HOME:-${HOME}/.local/share}/garmin-express/prefix}"
+export WINEARCH=win64
+export WINEDEBUG="${WINEDEBUG:--all}"
+# don't let Wine create .desktop entries/file associations for the prefix
+export WINEDLLOVERRIDES="winemenubuilder.exe=d${WINEDLLOVERRIDES:+;${WINEDLLOVERRIDES}}"
+STAMP="${WINEPREFIX}/.garmin-express"
+
+notify() {
+	echo "garmin-express: $*" >&2
+	command -v notify-send >/dev/null && notify-send -a "Garmin Express" "Garmin Express" "$*" || true
+}
+
+prepare_prefix() {
+	notify "Wine-prefix wordt voorbereid in ${WINEPREFIX} (eenmalig, 10-20 minuten)..."
+	mkdir -p "${WINEPREFIX}"
+	wineboot --init
+	wineserver --wait
+
+	# Feed winetricks the runtimes shipped by the package (no downloads)
+	local cache="${XDG_CACHE_HOME:-${HOME}/.cache}/winetricks"
+	mkdir -p "${cache}/dotnet40" "${cache}/dotnet48" "${cache}/d3dcompiler_47"
+	cp -f "${APPDIR}/redist/dotNetFx40_Full_x86_x64.exe" "${cache}/dotnet40/"
+	cp -f "${APPDIR}/redist/ndp48-x86-x64-allos-enu.exe" "${cache}/dotnet48/"
+	cp -f "${APPDIR}/redist/d3dcompiler_47.dll" "${APPDIR}/redist/d3dcompiler_47_32.dll" "${cache}/d3dcompiler_47/"
+
+	winetricks -q --unattended dotnet48 d3dcompiler_47
+	wineserver --wait
+	# the embedded Chromium (CEF) window stays black with wined3d's GL/Vulkan
+	# renderer; the GDI renderer makes it draw in software
+	winetricks -q --unattended renderer=gdi
+	wineserver --wait
+	wine winecfg /v win10
+	wineserver --wait
+	echo "${PREFIX_VERSION}" > "${STAMP}-prefix"
+}
+
+install_app() {
+	notify "Garmin Express ${APP_VERSION} wordt geïnstalleerd in de Wine-prefix..."
+	wine "${APPDIR}/GarminExpress.exe" /quiet /norestart || true
+	wineserver --wait
+	echo "${APP_VERSION}" > "${STAMP}-app"
+}
+
+[[ "$(cat "${STAMP}-prefix" 2>/dev/null)" == "${PREFIX_VERSION}" ]] || prepare_prefix
+[[ "$(cat "${STAMP}-app" 2>/dev/null)" == "${APP_VERSION}" ]] || install_app
+
+exe=$(find "${WINEPREFIX}/drive_c/Program Files"*/Garmin -iname express.exe 2>/dev/null | head -n1)
+if [[ -z ${exe} ]]; then
+	notify "express.exe niet gevonden in ${WINEPREFIX}; verwijder de map om opnieuw te installeren."
+	exit 1
+fi
+cd "$(dirname "${exe}")"
+exec wine "${exe}" "$@"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>pellingert@gmail.com</email>
+	</maintainer>
+	<longdescription lang="en">
+		Garmin Express updates firmware and maps of Garmin devices and syncs
+		activities. Upstream only ships Windows and macOS builds; this package
+		installs the Windows installer plus the .NET Framework 4.0/4.8 and
+		d3dcompiler_47 runtimes into /opt and sets up a per-user Wine prefix
+		on first start. Devices that appear as a USB drive work; MTP-only
+		watches are not visible to Wine.
+	</longdescription>
+</pkgmetadata>

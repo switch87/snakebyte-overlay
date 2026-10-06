@@ -31,6 +31,37 @@ upload timestamp, so new versions are created with the bump script:
 bash /var/db/repos/snakebyte/media-gfx/bambu-suite-bin/files/bambu-suite-bump
 ```
 
+### Garmin Express — `app-misc/garmin-express-bin`
+
+Garmin's desktop tool to update the firmware and maps of Garmin devices and
+sync activities. Garmin only ships it for Windows and macOS, so this package
+runs the Windows build under Wine:
+
+- the installer, the .NET Framework 4.0 and 4.8 installers and `d3dcompiler_47` are
+  installed into `/opt/garmin-express` at emerge time (no downloads later);
+- the `garmin-express` launcher creates a per-user Wine prefix in
+  `~/.local/share/garmin-express/prefix` on first start (winetricks
+  `dotnet48` + `d3dcompiler_47` fed from `/opt`, the GDI renderer (the
+  embedded Chromium window stays black otherwise), then a silent install of
+  Garmin Express; 10-20 minutes, once). A newer package version is installed
+  into the existing prefix on the next start;
+- a udev rule gives the logged-in user access to Garmin USB devices (vendor
+  `091e`);
+- reset the prefix by removing that directory; use another one with
+  `GARMIN_EXPRESS_WINEPREFIX=/path garmin-express`.
+
+**Device support:** devices that show up as a USB drive (bike computers,
+older GPS units and watches) are mounted by the desktop and appear as a Wine
+drive. Recent watches that only speak MTP are not visible to Wine — update
+those with the Garmin Connect phone app.
+
+Garmin serves the installer under a fixed URL, so a new release breaks the
+Manifest; pick it up with the bump script:
+
+```sh
+sudo bash /var/db/repos/snakebyte/app-misc/garmin-express-bin/files/garmin-express-bump
+```
+
 ### LightBurn — `media-gfx/lightburn-bin` and `media-gfx/lightburn-wine`
 
 Layout and control software for laser cutters. LightBurn dropped Linux after
@@ -198,6 +229,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
+| `app-misc/garmin-express-bin` | 7.29.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | USB-drive devices only, no MTP; tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
 | `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
