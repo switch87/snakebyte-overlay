@@ -50,20 +50,15 @@ runs the Windows build under Wine:
 - reset the prefix by removing that directory; use another one with
   `GARMIN_EXPRESS_WINEPREFIX=/path garmin-express`.
 
-**Device support — does not work (tested 2026-10-06):** Garmin Express starts,
-signs in and shows its UI, but it does not detect devices. An Edge 530
-(USB mass storage, mounted and mapped by Wine as drive D:, also as a
-removable drive) is never found: Express detects devices through the
-Windows USB stack (SetupAPI/WMI), which Wine does not provide. MTP watches
-are not visible either. Update firmware with the Garmin Connect phone app;
-for maps use OSM-based `gmapsupp.img` files copied to `Garmin/` on the device.
-
-Garmin serves the installer under a fixed URL, so a new release breaks the
-Manifest; pick it up with the bump script:
-
-```sh
-sudo bash /var/db/repos/snakebyte/app-misc/garmin-express-bin/files/garmin-express-bump
-```
+**Version 7.13.1.0 on purpose (tested 2026-10-06 with an Edge 530):** newer
+Garmin Express versions (e.g. 7.29.1.0) identify USB-mass-storage devices
+through the Windows USB stack (storage device number → parent disk →
+`USB\VID_091E`), which Wine does not provide, so they never find a device.
+7.13.1.0 (July 2022, fetched from the Internet Archive) still scans the
+drives for `Garmin/GarminDevice.xml`: plug the device in, let the desktop
+mount it (Wine turns it into a drive letter) and use *Add a Device*.
+Decline Express's offer to update itself. MTP-only watches stay invisible to
+Wine; use the Garmin Connect phone app for those.
 
 ### LightBurn — `media-gfx/lightburn-bin` and `media-gfx/lightburn-wine`
 
@@ -232,7 +227,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
-| `app-misc/garmin-express-bin` | 7.29.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | UI works, device detection does not (Wine has no USB stack); tested with wine-vanilla-11.0 |
+| `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
 | `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
