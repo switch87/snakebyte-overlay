@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly map update (map-update)
+
+[Timer]
+# Sunday evening; OpenFietsMap usually publishes at the end of the week
+OnCalendar=Sun 20:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

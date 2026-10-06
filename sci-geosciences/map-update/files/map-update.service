@@ -1,0 +1,10 @@
+[Unit]
+Description=Update offline maps in QMapShack and on connected Garmin devices
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/map-update
+Nice=10
+IOSchedulingClass=idle

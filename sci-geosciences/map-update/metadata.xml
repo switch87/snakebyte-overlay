@@ -5,12 +5,12 @@
 		<email>pellingert@gmail.com</email>
 	</maintainer>
 	<longdescription lang="en">
-		kaarten-update downloads Garmin .img maps (a .zip with a .img inside,
+		map-update downloads offline maps in Garmin .img format (a .zip with a .img inside,
 		or a plain .img) from HTTP(S) servers when the server has a new
 		version (ETag/Last-Modified), and installs them into a QMapShack map
 		directory and onto every connected Garmin device in USB drive mode
 		(recognised by Garmin/GarminDevice.xml). Which maps is configured in
-		~/.config/kaarten-update.toml; messages are in Dutch.
+		~/.config/map-update.toml.
 	</longdescription>
 	<upstream>
 		<remote-id type="github">switch87/snakebyte-overlay</remote-id>

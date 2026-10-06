@@ -60,19 +60,22 @@ mount it (Wine turns it into a drive letter) and use *Add a Device*.
 Decline Express's offer to update itself. MTP-only watches stay invisible to
 Wine; use the Garmin Connect phone app for those.
 
-### kaarten-update — `sci-geosciences/kaarten-update`
+### map-update — `sci-geosciences/map-update`
 
-Keeps Garmin `.img` maps (e.g. [OpenFietsMap](https://ligfietser.dev.openstreetmap.org/openfietsmap/))
-up to date in QMapShack and on every connected Garmin device in USB drive
-mode. Which maps, where from and under which file name is configured in
-`~/.config/kaarten-update.toml` (created with an example on the first run);
-a map is only downloaded when the server reports a new version. Messages are
-in Dutch.
+Keeps offline maps in Garmin `.img` format up to date in QMapShack and/or on
+every connected Garmin device in USB drive mode. Which maps, where from and
+under which file name is configured in `~/.config/map-update.toml` (created
+with an example on the first run); a map is only downloaded when the server
+reports a new version. Free sources with stable URLs:
+[OpenFietsMap](https://ligfietser.dev.openstreetmap.org/openfietsmap/),
+[Freizeitkarte](https://download.freizeitkarte-osm.de/garmin/latest/) and
+[alternativaslibres.org](https://alternativaslibres.org/en/downloads.php)
+(worldwide).
 
 ```sh
-kaarten-update --check                          # what is new?
-kaarten-update                                  # download and install
-systemctl --user enable --now kaarten-update.timer   # weekly, Sunday 20:00
+map-update --check                          # what is new?
+map-update                                  # download and install
+systemctl --user enable --now map-update.timer   # weekly, Sunday 20:00
 ```
 
 ### LightBurn — `media-gfx/lightburn-bin` and `media-gfx/lightburn-wine`
@@ -277,7 +280,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
-| `sci-geosciences/kaarten-update` | 1.0 | Keep Garmin .img maps up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
+| `sci-geosciences/map-update` | 1.0 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
 | `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |
 
 All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from

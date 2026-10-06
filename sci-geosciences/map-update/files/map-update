@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""map-update: keep offline maps (Garmin .img format) up to date in QMapShack and on Garmin devices.
+
+Which maps, where from and where to is configured in a TOML file (default
+~/.config/map-update.toml; created with an example on the first run).
+Each map is a download (a .zip with a .img inside, or a plain .img) from an
+HTTP(S) server, installed into a QMapShack map directory, onto connected
+Garmin devices, or both. Free sources with stable URLs include OpenFietsMap,
+Freizeitkarte and alternativaslibres.org (examples in the configuration).
+
+Usage:
+    map-update                  download and install new versions
+    map-update --check          only show which maps are new
+    map-update --force          reinstall everything
+    map-update --map NAME       only this map (may be given more than once)
+    map-update --no-garmin      skip Garmin devices
+    map-update --config PATH    use another configuration file
+
+How it works:
+- New = the server's ETag/Last-Modified differs from last time; otherwise
+  nothing is downloaded.
+- Interrupted downloads are resumed and zip files are verified. Downloads are
+  removed after installation (set keep_downloads = true to keep them); a
+  Garmin device connected later gets its copy from the QMapShack directory
+  when that has the current version.
+- Garmin devices are recognised by Garmin/GarminDevice.xml on a mounted
+  drive with one of the configured labels (unmounted ones are mounted with
+  udisksctl). Files are written as .part first and only renamed once
+  complete, so pulling the cable never leaves a half-written map behind.
+  Other files on the device are left alone.
+"""
+import argparse
+import fnmatch
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+import urllib.parse
+import urllib.request
+import zipfile
+from pathlib import Path
+
+HOME = Path.home()
+DEFAULT_CONFIG = HOME / ".config/map-update.toml"
+STATE = HOME / ".local/state/map-update.json"
+CACHE = HOME / ".cache/map-update"
+
+EXAMPLE = '''\
+# map-update: which offline maps (Garmin .img format) to keep up to date.
+# Each [[map]] is a download: a .zip with a .img inside, or a plain .img.
+# It goes to QMapShack, to Garmin devices, or both.
+
+[general]
+# QMapShack map directory the .img maps go to (empty = skip QMapShack).
+qmapshack_maps = "~/QMapShackData/Maps"
+# Drive label(s) of Garmin devices (an Edge/eTrex/Fenix in USB drive mode is called "GARMIN").
+garmin_labels = ["GARMIN"]
+# Keep downloaded .zip files in ~/.cache/map-update (needs as much space again).
+keep_downloads = false
+
+[[map]]
+name = "OpenFietsMap Benelux"
+# Download URL (.zip or .img)
+url = "https://ligfietser.dev.openstreetmap.org/openfietsmap/benelux/full/OpenFietsMap.zip"
+# Which file inside the zip (glob pattern); not needed for a plain .img
+file_in_zip = "*gmapsupp.img"
+# File name in QMapShack (empty = not in QMapShack)
+qmapshack_name = "OpenFietsMap_Benelux.img"
+# File name in the Garmin/ directory on the device (empty = not on Garmin devices)
+garmin_name = "gmapsupp-openfietsmap.img"
+
+# Another map? Copy the block above, for example:
+# [[map]]
+# name = "OpenFietsMap Benelux light"
+# url = "https://ligfietser.dev.openstreetmap.org/openfietsmap/benelux/light/OpenFietsMap_light.zip"
+# file_in_zip = "*gmapsupp.img"
+# qmapshack_name = ""
+# garmin_name = "gmapsupp-ofm-light.img"
+#
+# More sources with stable URLs (check their licence and size first):
+# - Freizeitkarte (topographic, contour lines), per country/region:
+#   https://download.freizeitkarte-osm.de/garmin/latest/  e.g. FRA_en_gmapsupp.img.zip
+#   file_in_zip = "*gmapsupp.img"
+# - alternativaslibres.org (worldwide, per country; _DEM = with elevation data):
+#   https://alternativaslibres.org/files/gmapsupp_Philippines_DEM.zip
+#   file_in_zip = "*.img"
+'''
+
+
+def log(text):
+    print(f"{time.strftime('%H:%M:%S')} {text}", flush=True)
+
+
+def notify(text):
+    if shutil.which("notify-send") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        subprocess.run(["notify-send", "-a", "map-update", "Maps updated", text], check=False)
+
+
+def read_config(path):
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(EXAMPLE)
+        log(f"example configuration created: {path}")
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+    general = cfg.get("general", {})
+    qms = general.get("qmapshack_maps", "")
+    general["qmapshack_maps"] = Path(qms).expanduser() if qms else None
+    general["garmin_labels"] = [l.upper() for l in general.get("garmin_labels", ["GARMIN"])]
+    general.setdefault("keep_downloads", False)
+    maps = cfg.get("map", [])
+    for m in maps:
+        for field in ("name", "url"):
+            if not m.get(field):
+                sys.exit(f"{path}: a [[map]] is missing '{field}'")
+    return general, maps
+
+
+def read_state():
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(state):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+
+
+def cache_name(m):
+    return "".join(c if c.isalnum() else "_" for c in m["name"])
+
+
+def server_version(url):
+    req = urllib.request.Request(url, method="HEAD")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        h = r.headers
+        return {
+            "id": h.get("ETag") or h.get("Last-Modified") or h.get("Content-Length", ""),
+            "date": h.get("Last-Modified", "?"),
+            "size": int(h.get("Content-Length", 0) or 0),
+        }
+
+
+def download(m, version):
+    """Download (resuming if possible) into the cache; returns the path."""
+    CACHE.mkdir(parents=True, exist_ok=True)
+    name = Path(urllib.parse.urlparse(m["url"]).path).name or "download"
+    dest = CACHE / f"{cache_name(m)}--{name}"
+    part = dest.with_name(dest.name + ".part")
+    stamp = dest.with_name(dest.name + ".version")
+    same = stamp.exists() and stamp.read_text() == version["id"]
+    if dest.exists() and same:
+        log(f"{m['name']}: download already in the cache")
+        return dest
+    if part.exists() and not same:  # partial file of an older version
+        part.unlink()
+    stamp.write_text(version["id"])
+    start = part.stat().st_size if part.exists() else 0
+    req = urllib.request.Request(m["url"])
+    if start:
+        req.add_header("Range", f"bytes={start}-")
+        log(f"{m['name']}: resuming download at {start / 1e6:.0f} MB")
+    with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab" if start else "wb") as f:
+        if start and r.status != 206:  # server ignores Range
+            f.seek(0)
+            f.truncate()
+            start = 0
+        total, done, last = version["size"], start, 0.0
+        while block := r.read(1 << 20):
+            f.write(block)
+            done += len(block)
+            if time.monotonic() - last > 15:
+                log(f"{m['name']}: {done / 1e6:.0f}" + (f"/{total / 1e6:.0f}" if total else "") + " MB")
+                last = time.monotonic()
+    if version["size"] and part.stat().st_size != version["size"]:
+        sys.exit(f"{m['name']}: incomplete download ({part.stat().st_size} of {version['size']} bytes)")
+    part.replace(dest)
+    return dest
+
+
+def get_img(m, download_path):
+    """Returns the path to the .img (extracted from the zip, or the download itself)."""
+    if not zipfile.is_zipfile(download_path):
+        return download_path
+    pattern = m.get("file_in_zip", "*.img")
+    with zipfile.ZipFile(download_path) as z:
+        bad = z.testzip()
+        if bad:
+            download_path.unlink()
+            sys.exit(f"{m['name']}: corrupt zip ({bad}); try again")
+        names = [n for n in z.namelist() if fnmatch.fnmatch(n.lower(), pattern.lower())]
+        if len(names) != 1:
+            sys.exit(f"{m['name']}: '{pattern}' matches {len(names)} files in the zip: {names[:10]}")
+        img = CACHE / f"{cache_name(m)}.img"
+        with z.open(names[0]) as src, open(img, "wb") as dst:
+            shutil.copyfileobj(src, dst, 1 << 20)
+    log(f"{m['name']}: extracted {names[0]} ({img.stat().st_size / 1e6:.0f} MB)")
+    return img
+
+
+def safe_copy(src, dest):
+    """Copy via a .part file and rename only once everything is on disk."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    with open(src, "rb") as s, open(tmp, "wb") as d:
+        shutil.copyfileobj(s, d, 1 << 20)
+        d.flush()
+        os.fsync(d.fileno())
+    tmp.replace(dest)
+    subprocess.run(["sync", "-f", str(dest)], check=False)
+
+
+def garmin_devices(labels):
+    """Mounted Garmin devices (mounting them if needed): {name: mountpoint}."""
+    found = {}
+    try:
+        out = subprocess.run(["lsblk", "-J", "-o", "PATH,LABEL,MOUNTPOINTS"],
+                             capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return found
+
+    def walk(devs):
+        for d in devs:
+            yield d
+            yield from walk(d.get("children", []))
+
+    for d in walk(json.loads(out).get("blockdevices", [])):
+        if (d.get("label") or "").upper() not in labels:
+            continue
+        mounts = [p for p in (d.get("mountpoints") or []) if p]
+        if not mounts and shutil.which("udisksctl"):
+            subprocess.run(["udisksctl", "mount", "-b", d["path"]], capture_output=True, text=True)
+            out2 = subprocess.run(["lsblk", "-no", "MOUNTPOINTS", d["path"]], capture_output=True, text=True).stdout
+            mounts = [p for p in out2.split("\n") if p]
+        for p in mounts:
+            xml = Path(p) / "Garmin/GarminDevice.xml"
+            if xml.exists():
+                t = xml.read_text(errors="ignore")
+                model = t.split("<Description>", 1)[1].split("<", 1)[0] if "<Description>" in t else "Garmin"
+                serial = t.split("<Id>", 1)[1].split("<", 1)[0] if "<Id>" in t else p
+                found[f"{model} ({serial})"] = Path(p)
+    return found
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Keep offline maps up to date in QMapShack and on Garmin devices.")
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    ap.add_argument("--check", action="store_true", help="only show what is new")
+    ap.add_argument("--force", action="store_true", help="reinstall everything")
+    ap.add_argument("--map", action="append", help="only this map (name from the configuration)")
+    ap.add_argument("--no-garmin", action="store_true", help="skip Garmin devices")
+    args = ap.parse_args()
+
+    general, maps = read_config(args.config)
+    if args.map:
+        maps = [m for m in maps if m["name"] in args.map]
+        if not maps:
+            sys.exit(f"no map with that name in {args.config}")
+    state = read_state()
+    devices = {} if (args.no_garmin or args.check) else garmin_devices(general["garmin_labels"])
+    if devices:
+        log("Garmin: " + ", ".join(devices))
+    updated = []
+
+    for m in maps:
+        st = state.setdefault(m["name"], {})
+        try:
+            version = server_version(m["url"])
+        except OSError as e:
+            log(f"{m['name']}: server unreachable ({e})")
+            continue
+        new = version["id"] != st.get("version")
+        log(f"{m['name']}: server {version['date']} ({version['size'] / 1e6:.0f} MB)"
+            + (" - NEW" if new else " - already installed"))
+        if args.check:
+            continue
+
+        qms_dest = general["qmapshack_maps"] / m["qmapshack_name"] if general["qmapshack_maps"] and m.get("qmapshack_name") else None
+        do_qms = qms_dest and (args.force or new or not qms_dest.exists())
+        do_garmin = {}
+        if m.get("garmin_name"):
+            for dev, mount in devices.items():
+                dest = mount / "Garmin" / m["garmin_name"]
+                if args.force or not dest.exists() or st.get("garmin", {}).get(dev) != version["id"]:
+                    do_garmin[dev] = dest
+        if not do_qms and not do_garmin:
+            continue
+
+        if not do_qms and qms_dest and qms_dest.exists() and st.get("version") == version["id"]:
+            zip_or_img = img = qms_dest  # QMapShack already has this version: copy that one
+        else:
+            zip_or_img = download(m, version)
+            img = get_img(m, zip_or_img)
+        if do_qms:
+            safe_copy(img, qms_dest)
+            log(f"{m['name']}: QMapShack -> {qms_dest}")
+        for dev, dest in do_garmin.items():
+            free = shutil.disk_usage(dest.parent).free + (dest.stat().st_size if dest.exists() else 0)
+            if free < img.stat().st_size + 50e6:
+                log(f"{m['name']}: not enough space on {dev} ({free / 1e6:.0f} MB), skipped")
+                continue
+            log(f"{m['name']}: copying to {dev} ({dest}) ...")
+            safe_copy(img, dest)
+            st.setdefault("garmin", {})[dev] = version["id"]
+        st.update(version=version["id"], date=version["date"], installed=time.strftime("%Y-%m-%d %H:%M"))
+        save_state(state)
+        if img != zip_or_img:
+            img.unlink(missing_ok=True)  # extracted copy
+        if zip_or_img.is_relative_to(CACHE) and not general["keep_downloads"]:
+            zip_or_img.unlink(missing_ok=True)
+        updated.append(m["name"] + (f" (+ {', '.join(do_garmin)})" if do_garmin else ""))
+
+    if updated:
+        text = "Updated: " + "; ".join(updated)
+        log(text)
+        notify(text + ". In QMapShack: right-click the map list -> Reload maps.")
+    elif not args.check:
+        log("everything is up to date")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

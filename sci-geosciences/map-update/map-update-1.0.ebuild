@@ -7,7 +7,7 @@ PYTHON_COMPAT=( python3_{12..15} )
 
 inherit python-single-r1 systemd
 
-DESCRIPTION="Keep Garmin .img maps up to date in QMapShack and on Garmin devices"
+DESCRIPTION="Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices"
 HOMEPAGE="https://github.com/switch87/snakebyte-overlay"
 S="${WORKDIR}"
 
@@ -23,14 +23,14 @@ RDEPEND="
 "
 
 src_install() {
-	python_newscript "${FILESDIR}"/kaarten-update kaarten-update
-	systemd_douserunit "${FILESDIR}"/kaarten-update.{service,timer}
+	python_newscript "${FILESDIR}"/map-update map-update
+	systemd_douserunit "${FILESDIR}"/map-update.{service,timer}
 }
 
 pkg_postinst() {
-	elog "The maps to keep up to date are listed in ~/.config/kaarten-update.toml,"
+	elog "The maps to keep up to date are listed in ~/.config/map-update.toml,"
 	elog "created with an example (OpenFietsMap Benelux) on the first run."
-	elog "Check for new versions without installing: kaarten-update --check"
+	elog "Check for new versions without installing: map-update --check"
 	elog "Weekly automatic updates (Sunday 20:00) for a user:"
-	elog "  systemctl --user enable --now kaarten-update.timer"
+	elog "  systemctl --user enable --now map-update.timer"
 }
