@@ -1,33 +1,7 @@
 #!/usr/bin/env python3
 """map-update: keep offline maps (Garmin .img format) up to date in QMapShack and on Garmin devices.
 
-Which maps, where from and where to is configured in a TOML file (default
-~/.config/map-update.toml; created with an example on the first run).
-Each map is a download (a .zip with a .img inside, or a plain .img) from an
-HTTP(S) server, installed into a QMapShack map directory, onto connected
-Garmin devices, or both. Free sources with stable URLs include OpenFietsMap,
-Freizeitkarte and alternativaslibres.org (examples in the configuration).
-
-Usage:
-    map-update                  download and install new versions
-    map-update --check          only show which maps are new
-    map-update --force          reinstall everything
-    map-update --map NAME       only this map (may be given more than once)
-    map-update --no-garmin      skip Garmin devices
-    map-update --config PATH    use another configuration file
-
-How it works:
-- New = the server's ETag/Last-Modified differs from last time; otherwise
-  nothing is downloaded.
-- Interrupted downloads are resumed and zip files are verified. Downloads are
-  removed after installation (set keep_downloads = true to keep them); a
-  Garmin device connected later gets its copy from the QMapShack directory
-  when that has the current version.
-- Garmin devices are recognised by Garmin/GarminDevice.xml on a mounted
-  drive with one of the configured labels (unmounted ones are mounted with
-  udisksctl). Files are written as .part first and only renamed once
-  complete, so pulling the cable never leaves a half-written map behind.
-  Other files on the device are left alone.
+See `map-update --help` and the README (/usr/share/doc/map-update-*/README.md).
 """
 import argparse
 import fnmatch
@@ -42,6 +16,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+
+VERSION = "1.1"
 
 HOME = Path.home()
 DEFAULT_CONFIG = HOME / ".config/map-update.toml"
@@ -248,12 +224,51 @@ def garmin_devices(labels):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Keep offline maps up to date in QMapShack and on Garmin devices.")
-    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    ap.add_argument("--check", action="store_true", help="only show what is new")
-    ap.add_argument("--force", action="store_true", help="reinstall everything")
-    ap.add_argument("--map", action="append", help="only this map (name from the configuration)")
-    ap.add_argument("--no-garmin", action="store_true", help="skip Garmin devices")
+    ap = argparse.ArgumentParser(
+        prog="map-update",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""\
+Keep offline maps (Garmin .img format) up to date in QMapShack and on Garmin
+devices. Each map is a download (a .zip with a .img inside, or a plain .img)
+from an HTTP(S) server. It is only downloaded when the server reports a new
+version (ETag/Last-Modified), then installed into the QMapShack map directory,
+onto every connected Garmin device in USB drive mode, or both.""",
+        epilog=f"""\
+configuration ({DEFAULT_CONFIG}, created with an example on the first run):
+  [general]
+  qmapshack_maps = "~/QMapShackData/Maps"   QMapShack map directory ("" = skip QMapShack)
+  garmin_labels  = ["GARMIN"]              drive labels of Garmin devices
+  keep_downloads = false                   keep the downloaded .zip files in the cache
+
+  [[map]]                                  one block per map
+  name           = "OpenFietsMap Benelux"  name used in messages and with --map
+  url            = "https://.../OpenFietsMap.zip"   download (.zip or .img)
+  file_in_zip    = "*gmapsupp.img"         glob of the .img inside the zip
+  qmapshack_name = "OpenFietsMap.img"      file name in QMapShack ("" = not there)
+  garmin_name    = "gmapsupp-ofm.img"      file name in Garmin/ on the device ("" = not there)
+
+examples:
+  map-update --check                       which maps have a new version?
+  map-update                               download and install them
+  map-update --map "OpenFietsMap Benelux"  only this map
+  map-update --force --no-garmin           reinstall everything in QMapShack only
+  systemctl --user enable --now map-update.timer   weekly, Sunday 20:00
+
+files:
+  {DEFAULT_CONFIG}
+  {STATE}   installed versions per map and device
+  {CACHE}/  downloads in progress
+
+After an update, reload the maps in QMapShack (right-click the map list ->
+Reload maps). Documentation and map sources: /usr/share/doc/map-update-*/README.md""")
+    ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG, metavar="PATH",
+                    help="configuration file (default: %(default)s)")
+    ap.add_argument("--check", action="store_true", help="only show which maps have a new version; change nothing")
+    ap.add_argument("--force", action="store_true", help="reinstall every map, even when up to date")
+    ap.add_argument("--map", action="append", metavar="NAME",
+                    help="only this map (its name in the configuration); may be given more than once")
+    ap.add_argument("--no-garmin", action="store_true", help="leave Garmin devices alone")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     args = ap.parse_args()
 
     general, maps = read_config(args.config)

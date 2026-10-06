@@ -25,6 +25,8 @@ RDEPEND="
 src_install() {
 	python_newscript "${FILESDIR}"/map-update map-update
 	systemd_douserunit "${FILESDIR}"/map-update.{service,timer}
+	dodoc "${FILESDIR}"/README.md
+	docompress -x /usr/share/doc/${PF}/README.md
 }
 
 pkg_postinst() {
@@ -33,4 +35,6 @@ pkg_postinst() {
 	elog "Check for new versions without installing: map-update --check"
 	elog "Weekly automatic updates (Sunday 20:00) for a user:"
 	elog "  systemctl --user enable --now map-update.timer"
+	elog "All options: map-update --help; documentation and map sources:"
+	elog "  ${EROOT}/usr/share/doc/${PF}/README.md"
 }
