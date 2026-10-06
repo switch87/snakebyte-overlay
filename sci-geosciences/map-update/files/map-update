@@ -17,7 +17,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = "1.1"
+VERSION = "1.2"
 
 HOME = Path.home()
 DEFAULT_CONFIG = HOME / ".config/map-update.toml"
@@ -299,7 +299,11 @@ Reload maps). Documentation and map sources: /usr/share/doc/map-update-*/README.
         do_qms = qms_dest and (args.force or new or not qms_dest.exists())
         do_garmin = {}
         if m.get("garmin_name"):
-            for dev, mount in devices.items():
+            for dev, mount in list(devices.items()):
+                if not (mount / "Garmin").is_dir():  # unplugged since the start
+                    log(f"{dev} is no longer connected")
+                    del devices[dev]
+                    continue
                 dest = mount / "Garmin" / m["garmin_name"]
                 if args.force or not dest.exists() or st.get("garmin", {}).get(dev) != version["id"]:
                     do_garmin[dev] = dest
@@ -315,12 +319,17 @@ Reload maps). Documentation and map sources: /usr/share/doc/map-update-*/README.
             safe_copy(img, qms_dest)
             log(f"{m['name']}: QMapShack -> {qms_dest}")
         for dev, dest in do_garmin.items():
-            free = shutil.disk_usage(dest.parent).free + (dest.stat().st_size if dest.exists() else 0)
-            if free < img.stat().st_size + 50e6:
-                log(f"{m['name']}: not enough space on {dev} ({free / 1e6:.0f} MB), skipped")
+            try:
+                free = shutil.disk_usage(dest.parent).free + (dest.stat().st_size if dest.exists() else 0)
+                if free < img.stat().st_size + 50e6:
+                    log(f"{m['name']}: not enough space on {dev} ({free / 1e6:.0f} MB), skipped")
+                    continue
+                log(f"{m['name']}: copying to {dev} ({dest}) ...")
+                safe_copy(img, dest)
+            except OSError as e:  # e.g. unplugged during the copy; the old map stays
+                log(f"{m['name']}: copying to {dev} failed ({e}), skipped")
+                devices.pop(dev, None)
                 continue
-            log(f"{m['name']}: copying to {dev} ({dest}) ...")
-            safe_copy(img, dest)
             st.setdefault("garmin", {})[dev] = version["id"]
         st.update(version=version["id"], date=version["date"], installed=time.strftime("%Y-%m-%d %H:%M"))
         save_state(state)

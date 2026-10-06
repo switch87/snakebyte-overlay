@@ -284,7 +284,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
-| `sci-geosciences/map-update` | 1.1 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
+| `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
 | `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |
 
 All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
