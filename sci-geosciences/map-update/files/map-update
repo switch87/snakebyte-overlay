@@ -313,6 +313,7 @@ def main():
             img.unlink(missing_ok=True)  # extracted copy
         if zip_or_img.is_relative_to(CACHE) and not general["keep_downloads"]:
             zip_or_img.unlink(missing_ok=True)
+            zip_or_img.with_name(zip_or_img.name + ".version").unlink(missing_ok=True)
         updated.append(m["name"] + (f" (+ {', '.join(do_garmin)})" if do_garmin else ""))
 
     if updated:
