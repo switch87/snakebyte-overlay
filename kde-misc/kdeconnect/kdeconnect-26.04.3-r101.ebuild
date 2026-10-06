@@ -82,9 +82,14 @@ PATCHES=(
 	"${FILESDIR}/${P}-solid-6.26-freeze.patch" # in 26.08
 	# Pending: https://invent.kde.org/network/kdeconnect-kde/-/merge_requests/997
 	"${FILESDIR}/${P}-with_x11.patch"
+	# ::snakebyte: upstream 31c755d22 + 51dfea90b (TCP keepalive ~60s), in master, not in 26.04
+	"${FILESDIR}/${P}-tcp-keepalive.patch"
 	# ::snakebyte: geolocation plugin (desktop side of kdeconnect-android MR !529)
 	# + upstream 6c1238802 (loopback capabilities); drop once upstream merges
 	"${FILESDIR}/${P}-geolocation-plugin.patch"
+	# ::snakebyte: remote connect (custom devices by host name, retry while a
+	# paired device is unreachable, TCP_USER_TIMEOUT, settings UI); drop once upstream merges
+	"${FILESDIR}/${P}-remote-connect.patch"
 )
 
 src_prepare() {

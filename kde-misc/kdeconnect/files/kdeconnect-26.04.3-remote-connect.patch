@@ -1,0 +1,2380 @@
+KDE Connect over a VPN (branch remote-connect, upstream MR pending),
+backported to kdeconnect-kde 26.04.3:
+- custom devices may be IPv4 addresses or host names (e.g. Tailscale
+  MagicDNS), resolved on every send; invalid entries are rejected when the
+  list is set;
+- while custom devices are set and a paired device is unreachable, the
+  discovery packet is sent to them again, with backoff; right away when a
+  LAN link drops; never to an address a LAN link is connected to;
+- TCP_USER_TIMEOUT 60 s on LAN sockets (Linux);
+- settings section "Devices by Address" in the KDE Connect app;
+- no mDNS in LanLinkProvider's test mode (for its tests).
+
+Generated with: git diff <last geolocation commit> stable-26.04.3.
+Applies with -p1 after kdeconnect-26.04.3-geolocation-plugin.patch.
+
+diff --git a/app/qml/Settings.qml b/app/qml/Settings.qml
+index 8823008e9..e0bc4169a 100644
+--- a/app/qml/Settings.qml
++++ b/app/qml/Settings.qml
+@@ -1,6 +1,8 @@
+ // SPDX-FileCopyrightText: 2022 Carl Schwan <carl@carlschwan.eu>
+ // SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
+ 
++pragma ComponentBehavior: Bound
++
+ import QtQuick
+ import QtQuick.Controls
+ import QtQuick.Layouts
+@@ -14,6 +16,41 @@ Kirigami.ScrollablePage
+     id: page
+     title: i18nc("@title:window", "Settings")
+ 
++    // Host names are case-insensitive, and "phone.example.org." is "phone.example.org"
++    function normalizedAddress(address: string): string {
++        return address.trim().toLowerCase().replace(/(.)\.$/, "$1");
++    }
++
++    function hasCustomDevice(address: string): bool {
++        return Array.from(DaemonDbusInterface.customDevices).some(device => page.normalizedAddress(device) === address);
++    }
++
++    function addCustomDevice(): void {
++        const entered = customDeviceField.text.trim();
++        const address = page.normalizedAddress(entered);
++        if (address.length === 0) {
++            return;
++        }
++        if (!page.hasCustomDevice(address)) {
++            DaemonDbusInterface.customDevices = Array.from(DaemonDbusInterface.customDevices).concat([address]);
++        }
++        if (page.hasCustomDevice(address)) {
++            customDeviceField.text = "";
++            customDeviceField.statusMessage = "";
++        } else {
++            customDeviceField.status = Kirigami.MessageType.Error;
++            if (address.includes(":")) {
++                customDeviceField.statusMessage = i18nc("@info", "Only IPv4 addresses and host names are supported.");
++            } else {
++                customDeviceField.statusMessage = i18nc("@info", "\"%1\" is not a valid IP address or host name.", entered);
++            }
++        }
++    }
++
++    function removeCustomDevice(address: string): void {
++        DaemonDbusInterface.customDevices = Array.from(DaemonDbusInterface.customDevices).filter(device => device !== address);
++    }
++
+     ColumnLayout
+     {
+ 
+@@ -65,6 +102,57 @@ Kirigami.ScrollablePage
+             }
+         }
+ 
++        FormCard.FormHeader {
++            title: i18nc("@title:group", "Devices by Address")
++        }
++
++        FormCard.FormSectionText {
++            text: i18nc("@info", "Devices outside the local network, for example behind a VPN, cannot be discovered automatically. Add their IPv4 address or host name to connect to them. Only paired devices are trusted.")
++        }
++
++        FormCard.FormCard {
++            Repeater {
++                id: customDevicesRepeater
++                objectName: "customDevicesRepeater"
++                model: DaemonDbusInterface.customDevices
++
++                FormCard.FormTextDelegate {
++                    id: customDeviceDelegate
++
++                    required property string modelData
++
++                    text: modelData
++                    trailing: Button {
++                        icon.name: "list-remove"
++                        text: i18nc("@action:button %1 is an IP address or host name", "Remove %1", customDeviceDelegate.modelData)
++                        display: AbstractButton.IconOnly
++                        ToolTip.text: text
++                        ToolTip.visible: hovered
++                        onClicked: page.removeCustomDevice(customDeviceDelegate.modelData)
++                    }
++                }
++            }
++
++            FormCard.FormDelegateSeparator {
++                visible: customDevicesRepeater.count > 0
++            }
++
++            FormCard.FormTextFieldDelegate {
++                id: customDeviceField
++                objectName: "customDeviceField"
++                label: i18nc("@label:textbox", "IP address or host name")
++                placeholderText: i18nc("@info:placeholder", "192.168.1.10 or phone.example.org")
++                onAccepted: page.addCustomDevice()
++                onTextChanged: customDeviceField.statusMessage = ""
++                trailing: Button {
++                    icon.name: "list-add"
++                    text: i18nc("@action:button", "Add")
++                    enabled: customDeviceField.text.trim().length > 0
++                    onClicked: page.addCustomDevice()
++                }
++            }
++        }
++
+         FormCard.FormCard {
+             Layout.topMargin: Kirigami.Units.gridUnit
+ 
+diff --git a/core/backends/lan/CMakeLists.txt b/core/backends/lan/CMakeLists.txt
+index ebdd1771b..5cac4f13c 100644
+--- a/core/backends/lan/CMakeLists.txt
++++ b/core/backends/lan/CMakeLists.txt
+@@ -3,6 +3,9 @@ set(backends_kdeconnect_SRCS
+     ${backends_kdeconnect_SRCS}
+     backends/lan/server.cpp
+     backends/lan/lanlinkprovider.cpp
++    backends/lan/customdevices.cpp
++    backends/lan/customdeviceresolver.cpp
++    backends/lan/customdeviceretry.cpp
+     backends/lan/landevicelink.cpp
+     backends/lan/compositeuploadjob.cpp
+     backends/lan/uploadjob.cpp
+diff --git a/core/backends/lan/customdeviceresolver.cpp b/core/backends/lan/customdeviceresolver.cpp
+new file mode 100644
+index 000000000..8af642890
+--- /dev/null
++++ b/core/backends/lan/customdeviceresolver.cpp
+@@ -0,0 +1,95 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "customdeviceresolver.h"
++
++#include "core_debug.h"
++#include "customdevices.h"
++
++CustomDeviceResolver::CustomDeviceResolver(QObject *parent)
++    : QObject(parent)
++    , m_lookup([](const QString &hostName, QObject *context, std::function<void(const QHostInfo &)> done) {
++        return QHostInfo::lookupHost(hostName, context, std::move(done));
++    })
++    , m_lookupContext(std::make_unique<QObject>())
++{
++}
++
++void CustomDeviceResolver::setEntries(const QStringList &entries)
++{
++    m_entries = entries;
++}
++
++void CustomDeviceResolver::setLookup(const Lookup &lookup)
++{
++    m_lookup = lookup;
++}
++
++void CustomDeviceResolver::resolve()
++{
++    QList<QHostAddress> addresses;
++    for (const QString &entry : std::as_const(m_entries)) {
++        if (!CustomDevices::isValid(entry)) {
++            qCWarning(KDECONNECT_CORE) << "Invalid custom device address" << entry;
++            continue;
++        }
++        const QHostAddress address(entry);
++        if (address.isNull()) {
++            m_lookupIds.append(m_lookup(entry, m_lookupContext.get(), [this, entry](const QHostInfo &info) {
++                m_lookupIds.removeOne(info.lookupId());
++                lookedUp(entry, info);
++            }));
++        } else {
++            addresses.append(address);
++        }
++    }
++    if (!addresses.isEmpty()) {
++        Q_EMIT addressesResolved(addresses);
++    }
++}
++
++void CustomDeviceResolver::cancel()
++{
++    for (const int id : std::as_const(m_lookupIds)) {
++        QHostInfo::abortHostLookup(id);
++    }
++    m_lookupIds.clear();
++    // Results that are on their way already go with their context
++    m_lookupContext = std::make_unique<QObject>();
++}
++
++void CustomDeviceResolver::lookedUp(const QString &hostName, const QHostInfo &info)
++{
++    const QList<QHostAddress> resolved = info.addresses();
++    if (info.error() != QHostInfo::NoError || resolved.isEmpty()) {
++        // Retries look the name up again and again: warn only when it stops resolving
++        if (m_unresolved.contains(hostName)) {
++            qCDebug(KDECONNECT_CORE) << "Could not resolve custom device" << hostName << info.errorString();
++        } else {
++            m_unresolved.insert(hostName);
++            qCWarning(KDECONNECT_CORE) << "Could not resolve custom device" << hostName << info.errorString();
++        }
++        return;
++    }
++    m_unresolved.remove(hostName);
++
++    // Discovery packets are sent from IPv4 addresses only
++    QList<QHostAddress> addresses;
++    for (const QHostAddress &address : resolved) {
++        bool isIPv4 = false;
++        const quint32 ipv4 = address.toIPv4Address(&isIPv4); // also for ::ffff:a.b.c.d
++        if (isIPv4) {
++            addresses.append(QHostAddress(ipv4));
++        }
++    }
++    if (addresses.isEmpty()) {
++        qCDebug(KDECONNECT_CORE) << "Custom device" << hostName << "has no IPv4 address";
++        return;
++    }
++    Q_EMIT addressesResolved(addresses);
++}
++
++#include "moc_customdeviceresolver.cpp"
+diff --git a/core/backends/lan/customdeviceresolver.h b/core/backends/lan/customdeviceresolver.h
+new file mode 100644
+index 000000000..6ce0e28f3
+--- /dev/null
++++ b/core/backends/lan/customdeviceresolver.h
+@@ -0,0 +1,61 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include "kdeconnectcore_export.h"
++
++#include <QHostAddress>
++#include <QHostInfo>
++#include <QList>
++#include <QObject>
++#include <QSet>
++#include <QStringList>
++
++#include <functional>
++#include <memory>
++
++// Turns custom device entries (IP addresses or host names) into addresses.
++// Host names are looked up again on every resolve(), asynchronously.
++class KDECONNECTCORE_EXPORT CustomDeviceResolver : public QObject
++{
++    Q_OBJECT
++
++public:
++    // Looks up hostName and calls done with the result, later; done is not
++    // called if context is destroyed first. Returns the id of the lookup,
++    // which is also the lookupId() of the result. The default uses QHostInfo.
++    using Lookup = std::function<int(const QString &hostName, QObject *context, std::function<void(const QHostInfo &)> done)>;
++
++    explicit CustomDeviceResolver(QObject *parent = nullptr);
++
++    void setEntries(const QStringList &entries);
++    void setLookup(const Lookup &lookup);
++
++public Q_SLOTS:
++    // Emits addressesResolved() right away with all IP addresses among the
++    // entries, and once more for each host name that resolves to an IPv4
++    // address (IPv6 addresses are left out, IPv4-mapped ones converted). Host names
++    // that do not resolve and invalid entries are logged and skipped; a host
++    // name that keeps failing gets a warning only the first time.
++    void resolve();
++
++    // Aborts the lookups that are still running: they emit nothing.
++    void cancel();
++
++Q_SIGNALS:
++    void addressesResolved(const QList<QHostAddress> &addresses);
++
++private:
++    void lookedUp(const QString &hostName, const QHostInfo &info);
++
++    QStringList m_entries;
++    Lookup m_lookup;
++    // Context of the running lookups, replaced on cancel()
++    std::unique_ptr<QObject> m_lookupContext;
++    QList<int> m_lookupIds;
++    QSet<QString> m_unresolved;
++};
+diff --git a/core/backends/lan/customdeviceretry.cpp b/core/backends/lan/customdeviceretry.cpp
+new file mode 100644
+index 000000000..b6e55a28e
+--- /dev/null
++++ b/core/backends/lan/customdeviceretry.cpp
+@@ -0,0 +1,94 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "customdeviceretry.h"
++
++#include "daemon.h"
++
++#include <algorithm>
++
++CustomDeviceRetry::CustomDeviceRetry(QObject *parent)
++    : QObject(parent)
++{
++    m_timer.setInterval(m_firstInterval);
++    connect(&m_timer, &QTimer::timeout, this, [this] {
++        if (m_condition()) {
++            Q_EMIT retryDue();
++            // Retrying did not help so far: wait twice as long for the next one
++            m_timer.setInterval(std::min(m_timer.intervalAsDuration() * 2, m_maximumInterval));
++        }
++    });
++}
++
++void CustomDeviceRetry::setActive(bool active)
++{
++    if (active) {
++        resetInterval();
++        m_timer.start();
++    } else {
++        m_timer.stop();
++    }
++}
++
++bool CustomDeviceRetry::isActive() const
++{
++    return m_timer.isActive();
++}
++
++void CustomDeviceRetry::setInterval(std::chrono::milliseconds interval)
++{
++    m_firstInterval = interval;
++    m_timer.setInterval(interval);
++}
++
++std::chrono::milliseconds CustomDeviceRetry::interval() const
++{
++    return m_timer.intervalAsDuration();
++}
++
++std::chrono::milliseconds CustomDeviceRetry::remainingTime() const
++{
++    return m_timer.remainingTimeAsDuration();
++}
++
++void CustomDeviceRetry::setMaximumInterval(std::chrono::milliseconds interval)
++{
++    m_maximumInterval = interval;
++}
++
++std::chrono::milliseconds CustomDeviceRetry::maximumInterval() const
++{
++    return m_maximumInterval;
++}
++
++void CustomDeviceRetry::resetInterval()
++{
++    m_timer.setInterval(m_firstInterval);
++}
++
++void CustomDeviceRetry::retryNow()
++{
++    if (m_timer.isActive()) {
++        setActive(true);
++        Q_EMIT retryDue();
++    }
++}
++
++void CustomDeviceRetry::setCondition(const Condition &condition)
++{
++    m_condition = condition;
++}
++
++bool CustomDeviceRetry::pairedDeviceUnreachable()
++{
++    if (!Daemon::hasInstance()) {
++        return false;
++    }
++    const Daemon *daemon = Daemon::instance();
++    return daemon->devices(false, true).size() > daemon->devices(true, true).size();
++}
++
++#include "moc_customdeviceretry.cpp"
+diff --git a/core/backends/lan/customdeviceretry.h b/core/backends/lan/customdeviceretry.h
+new file mode 100644
+index 000000000..856279ee5
+--- /dev/null
++++ b/core/backends/lan/customdeviceretry.h
+@@ -0,0 +1,68 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include "kdeconnectcore_export.h"
++
++#include <QObject>
++#include <QTimer>
++
++#include <chrono>
++#include <functional>
++
++// While active, checks every interval() whether a retry is needed and then
++// emits retryDue(). Used to send the discovery packet to the custom devices
++// again while a paired device is unreachable, e.g. after the other device
++// switched networks. After each retry the interval doubles, up to
++// maximumInterval(); it starts again with the first interval on
++// setActive(true), resetInterval() and retryNow().
++class KDECONNECTCORE_EXPORT CustomDeviceRetry : public QObject
++{
++    Q_OBJECT
++
++public:
++    static constexpr std::chrono::milliseconds DefaultInterval = std::chrono::seconds(60);
++    static constexpr std::chrono::milliseconds DefaultMaximumInterval = std::chrono::minutes(15);
++    using Condition = std::function<bool()>;
++
++    explicit CustomDeviceRetry(QObject *parent = nullptr);
++
++    // (Re)starts with the first interval when active, stops otherwise.
++    void setActive(bool active);
++    bool isActive() const;
++
++    // The first interval; interval() is the current one.
++    void setInterval(std::chrono::milliseconds interval);
++    std::chrono::milliseconds interval() const;
++    std::chrono::milliseconds remainingTime() const;
++
++    void setMaximumInterval(std::chrono::milliseconds interval);
++    std::chrono::milliseconds maximumInterval() const;
++
++    // Goes back to the first interval, without starting or stopping.
++    void resetInterval();
++
++    // When active: emits retryDue() right away, whatever the condition says,
++    // and starts again with the first interval. Does nothing otherwise.
++    void retryNow();
++
++    // The default condition is pairedDeviceUnreachable().
++    void setCondition(const Condition &condition);
++
++    // True if at least one paired device known to the daemon is not reachable.
++    // False if there is no daemon.
++    static bool pairedDeviceUnreachable();
++
++Q_SIGNALS:
++    void retryDue();
++
++private:
++    QTimer m_timer;
++    std::chrono::milliseconds m_firstInterval = DefaultInterval;
++    std::chrono::milliseconds m_maximumInterval = DefaultMaximumInterval;
++    Condition m_condition = &CustomDeviceRetry::pairedDeviceUnreachable;
++};
+diff --git a/core/backends/lan/customdevices.cpp b/core/backends/lan/customdevices.cpp
+new file mode 100644
+index 000000000..af655c5e4
+--- /dev/null
++++ b/core/backends/lan/customdevices.cpp
+@@ -0,0 +1,51 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "customdevices.h"
++
++#include "core_debug.h"
++
++#include <QHostAddress>
++#include <QRegularExpression>
++
++namespace
++{
++// RFC 1123 host name: labels of letters, digits and -, not starting or ending with -.
++// The last label is not a number, or "999.1.1.1" would be a host name.
++const QRegularExpression s_hostName(QStringLiteral(
++    "^(?=.{1,253}\\.?$)(?!(?:.*\\.)?[0-9]+\\.?$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?$"));
++}
++
++bool CustomDevices::isValid(const QString &entry)
++{
++    if (entry != entry.trimmed()) {
++        return false;
++    }
++    const QHostAddress address(entry);
++    if (!address.isNull()) {
++        // Discovery packets are sent from IPv4 addresses only, so no IPv6.
++        // QHostAddress, like inet_aton(), also reads "192.168.1" (as 192.168.0.1), "3232235777"
++        // or "0x7f.1": take only the dotted decimal form, which means what it seems to
++        return address.protocol() == QAbstractSocket::IPv4Protocol && address.toString() == entry;
++    }
++    return s_hostName.match(entry).hasMatch();
++}
++
++QStringList CustomDevices::sanitized(QStringList entries)
++{
++    for (QString &entry : entries) {
++        entry = entry.trimmed();
++    }
++    entries.removeIf([](const QString &entry) {
++        if (isValid(entry)) {
++            return false;
++        }
++        qCWarning(KDECONNECT_CORE) << "Ignoring invalid custom device address" << entry;
++        return true;
++    });
++    entries.removeDuplicates();
++    return entries;
++}
+diff --git a/core/backends/lan/customdevices.h b/core/backends/lan/customdevices.h
+new file mode 100644
+index 000000000..37cf60586
+--- /dev/null
++++ b/core/backends/lan/customdevices.h
+@@ -0,0 +1,24 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include "kdeconnectcore_export.h"
++
++#include <QStringList>
++
++// Entries of the "custom devices" list: devices that are not found by
++// broadcast or mDNS and get the discovery packet by unicast instead.
++namespace CustomDevices
++{
++// An IPv4 address in dotted decimal form or a host name
++// (RFC 1123: labels of letters, digits and '-', at most 253 characters,
++// optional final '.', the last label not all digits). No whitespace.
++KDECONNECTCORE_EXPORT bool isValid(const QString &entry);
++
++// The entries trimmed, without invalid entries and duplicates, in their order.
++KDECONNECTCORE_EXPORT QStringList sanitized(QStringList entries);
++}
+diff --git a/core/backends/lan/lanlinkprovider.cpp b/core/backends/lan/lanlinkprovider.cpp
+index ecf852108..23deab3d8 100644
+--- a/core/backends/lan/lanlinkprovider.cpp
++++ b/core/backends/lan/lanlinkprovider.cpp
+@@ -7,6 +7,7 @@
+ #include "lanlinkprovider.h"
+ #include "core_debug.h"
+ 
++#include <algorithm>
+ #include <memory>
+ 
+ #ifndef Q_OS_WIN
+@@ -40,6 +41,25 @@
+ #include "avahidiscovery.h"
+ #endif
+ 
++namespace
++{
++// Tests run on 127.0.0.1 only: they must neither announce themselves on the
++// real network nor connect to the devices that mDNS finds there.
++class NoMdnsDiscovery : public MdnsDiscovery
++{
++public:
++    void onStart() override
++    {
++    }
++    void onStop() override
++    {
++    }
++    void onNetworkChange() override
++    {
++    }
++};
++}
++
+ // The size here is arbitrary, it needs to be considerably long as it includes the capabilities but there needs to be a limit.
+ // Tested between my systems and I get around 2000 per identity package.
+ static const int MAX_IDENTITY_PACKET_SIZE = 8192;
+@@ -55,20 +75,26 @@ LanLinkProvider::LanLinkProvider(bool testMode, bool isDisabled)
+     , m_testMode(testMode)
+     , m_combineNetworkChangeTimer(this)
+     , m_disabled(isDisabled)
++    , m_customDeviceResolver(this)
++    , m_customDeviceRetry(this)
+ {
+-#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
+-    // TODO: Both Windows and macOS have system APIs for mDNS that we could use.
+-    //       Windows docs: https://learn.microsoft.com/en-us/uwp/api/windows.networking.servicediscovery.dnssd
+-    m_mdnsDiscovery = new MdnshDiscovery(this);
+-#else
+-    if (AvahiDiscovery::hasAvahiDaemonRunning()) {
+-        qCInfo(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
+-        m_mdnsDiscovery = new AvahiDiscovery(this);
++    if (m_testMode) {
++        m_mdnsDiscovery = new NoMdnsDiscovery;
+     } else {
+-        qCInfo(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
++#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
++        // TODO: Both Windows and macOS have system APIs for mDNS that we could use.
++        //       Windows docs: https://learn.microsoft.com/en-us/uwp/api/windows.networking.servicediscovery.dnssd
+         m_mdnsDiscovery = new MdnshDiscovery(this);
+-    }
++#else
++        if (AvahiDiscovery::hasAvahiDaemonRunning()) {
++            qCInfo(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
++            m_mdnsDiscovery = new AvahiDiscovery(this);
++        } else {
++            qCInfo(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
++            m_mdnsDiscovery = new MdnshDiscovery(this);
++        }
+ #endif
++    }
+ 
+     m_combineNetworkChangeTimer.setInterval(0); // increase this if waiting a single event-loop iteration is not enough
+     m_combineNetworkChangeTimer.setSingleShot(true);
+@@ -79,6 +105,9 @@ LanLinkProvider::LanLinkProvider(bool testMode, bool isDisabled)
+     m_server->setProxy(QNetworkProxy::NoProxy);
+     connect(m_server, &QTcpServer::newConnection, this, &LanLinkProvider::newTcpConnection);
+ 
++    connect(&m_customDeviceResolver, &CustomDeviceResolver::addressesResolved, this, &LanLinkProvider::sendToCustomDevices);
++    connect(&m_customDeviceRetry, &CustomDeviceRetry::retryDue, &m_customDeviceResolver, &CustomDeviceResolver::resolve);
++
+     m_udpSocket.setProxy(QNetworkProxy::NoProxy);
+ 
+     connect(&m_udpSocket, &QAbstractSocket::errorOccurred, [](QAbstractSocket::SocketError socketError) {
+@@ -161,6 +190,8 @@ void LanLinkProvider::onStop()
+     m_mdnsDiscovery->onStop();
+     m_udpSocket.close();
+     m_server->close();
++    m_customDeviceRetry.setActive(false);
++    m_customDeviceResolver.cancel();
+     qCDebug(KDECONNECT_CORE) << "LanLinkProvider stopped";
+ }
+ 
+@@ -202,31 +233,44 @@ void LanLinkProvider::broadcastUdpIdentityPacket()
+     qCDebug(KDECONNECT_CORE) << "Broadcasting identity packet";
+ 
+     sendUdpIdentityPacket(getBroadcastAddresses());
++
++    // Custom devices get the packet by unicast; host names are looked up every time
++    const QStringList customDevices = KdeConnectConfig::instance().customDevices();
++    m_customDeviceResolver.setEntries(customDevices);
++    m_customDeviceResolver.resolve();
++    // Try them again while a paired device is unreachable (e.g. after it switched networks),
++    // after a minute and then less and less often
++    m_customDeviceRetry.setActive(!customDevices.isEmpty());
+ }
+ 
+ QList<QHostAddress> LanLinkProvider::getBroadcastAddresses()
+ {
+-    const QStringList customDevices = KdeConnectConfig::instance().customDevices();
+-
+     QList<QHostAddress> destinations;
+-    destinations.reserve(customDevices.length() + 1);
+ 
+     // Default broadcast address
+     destinations.append(m_testMode ? QHostAddress::LocalHost : QHostAddress::Broadcast);
+ 
+-    // Custom device addresses
+-    for (auto &customDevice : customDevices) {
+-        QHostAddress address(customDevice);
+-        if (address.isNull()) {
+-            qCWarning(KDECONNECT_CORE) << "Invalid custom device address" << customDevice;
+-        } else {
+-            destinations.append(address);
+-        }
+-    }
+-
+     return destinations;
+ }
+ 
++void LanLinkProvider::sendToCustomDevices(const QList<QHostAddress> &addresses)
++{
++    if (!m_server->isListening()) {
++        return; // stopped or disabled since
++    }
++    // A device we have a link with needs no discovery packet: it would only
++    // open a second connection that replaces the working one
++    QList<QHostAddress> destinations = addresses;
++    destinations.removeIf([this](const QHostAddress &address) {
++        return std::any_of(m_links.cbegin(), m_links.cend(), [&address](const LanDeviceLink *link) {
++            return link->hostAddress().isEqual(address, QHostAddress::ConvertV4MappedToIPv4);
++        });
++    });
++    if (!destinations.isEmpty()) {
++        sendUdpIdentityPacket(destinations);
++    }
++}
++
+ void LanLinkProvider::sendUdpIdentityPacket(const QList<QHostAddress> &addresses)
+ {
+     // Broadcast from every local IP address to reach all networks
+@@ -584,6 +628,8 @@ void LanLinkProvider::onLinkDestroyed(const QString &deviceId, DeviceLink *oldPt
+     qCDebug(KDECONNECT_CORE) << "LanLinkProvider deviceLinkDestroyed" << deviceId;
+     DeviceLink *link = m_links.take(deviceId);
+     Q_ASSERT(link == oldPtr);
++    // Try to reach the device again by address right away, not only at the next retry
++    m_customDeviceRetry.retryNow();
+ }
+ 
+ void LanLinkProvider::configureSslSocket(QSslSocket *socket, const QString &deviceId, bool isDeviceTrusted)
+@@ -635,6 +681,15 @@ void LanLinkProvider::configureSocket(QSslSocket *socket)
+ #endif
+         setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+         setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
++#ifdef TCP_USER_TIMEOUT
++        // Keepalive does not run while sent data is unacknowledged, e.g. when
++        // the device switched networks during a transfer. Give up on such a
++        // connection after 60s as well, so the device can reconnect another way.
++        // Keep the two in step: with data in flight this timeout applies, on an
++        // idle connection keepalive gives up after idle + cnt * intvl = 60s.
++        unsigned int userTimeout = 60000; // milliseconds
++        setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &userTimeout, sizeof(userTimeout));
++#endif
+     }
+ #endif
+ }
+@@ -676,6 +731,8 @@ void LanLinkProvider::addLink(QSslSocket *socket, const DeviceInfo &deviceInfo)
+         }
+         m_links[deviceInfo.id] = deviceLink;
+     }
++    // A device connected: the retries for the others start over at the first interval
++    m_customDeviceRetry.resetInterval();
+     Q_EMIT onConnectionReceived(deviceLink);
+ }
+ 
+diff --git a/core/backends/lan/lanlinkprovider.h b/core/backends/lan/lanlinkprovider.h
+index 584ee438e..15410a5d7 100644
+--- a/core/backends/lan/lanlinkprovider.h
++++ b/core/backends/lan/lanlinkprovider.h
+@@ -17,6 +17,8 @@
+ #include <QUdpSocket>
+ 
+ #include "backends/linkprovider.h"
++#include "customdeviceresolver.h"
++#include "customdeviceretry.h"
+ #include "kdeconnectcore_export.h"
+ #include "landevicelink.h"
+ #include "mdnsdiscovery.h"
+@@ -83,6 +85,7 @@ private Q_SLOTS:
+     void tcpPacketReceived();
+     void sslErrors(const QList<QSslError> &errors);
+     void debouncedOnNetworkChange();
++    void sendToCustomDevices(const QList<QHostAddress> &addresses);
+ 
+ private:
+     void addLink(QSslSocket *socket, const DeviceInfo &deviceInfo);
+@@ -104,6 +107,10 @@ private:
+     bool m_disabled;
+ 
+     MdnsDiscovery *m_mdnsDiscovery = nullptr;
++
++    // Devices that broadcast and mDNS do not reach, by IP address or host name
++    CustomDeviceResolver m_customDeviceResolver;
++    CustomDeviceRetry m_customDeviceRetry;
+ };
+ 
+ #endif
+diff --git a/core/daemon.cpp b/core/daemon.cpp
+index 2f0dda8e6..564275a90 100644
+--- a/core/daemon.cpp
++++ b/core/daemon.cpp
+@@ -24,6 +24,7 @@
+ #endif
+ 
+ #include "backends/devicelink.h"
++#include "backends/lan/customdevices.h"
+ #include "backends/lan/lanlinkprovider.h"
+ #include "backends/linkprovider.h"
+ #include "backends/loopback/loopbacklinkprovider.h"
+@@ -47,6 +48,11 @@ Daemon *Daemon::instance()
+     return s_instance;
+ }
+ 
++bool Daemon::hasInstance()
++{
++    return s_instance != nullptr;
++}
++
+ Daemon::Daemon(QObject *parent, bool testMode)
+     : QObject(parent)
+     , d(new DaemonPrivate)
+@@ -77,6 +83,14 @@ void Daemon::init()
+     auto configInstance = KdeConnectConfig::instance();
+     const auto disabledLinkProviders = configInstance.disabledLinkProviders();
+ 
++    // Older versions stored custom devices without checking them; drop the invalid ones
++    // once here, rather than skipping them with a warning on every discovery
++    const QStringList customDevices = KdeConnectConfig::instance().customDevices();
++    const QStringList validCustomDevices = CustomDevices::sanitized(customDevices);
++    if (validCustomDevices != customDevices) {
++        KdeConnectConfig::instance().setCustomDevices(validCustomDevices);
++    }
++
+     qCDebug(KDECONNECT_CORE) << "Constructing Backends";
+     // Load backends
+     if (d->m_testMode) {
+@@ -284,9 +298,10 @@ void Daemon::setAnnouncedName(const QString &name)
+     Q_EMIT announcedNameChanged(filteredName);
+ }
+ 
+-void Daemon::setCustomDevices(const QStringList &addresses)
++void Daemon::setCustomDevices(const QStringList &requestedAddresses)
+ {
+     auto &config = KdeConnectConfig::instance();
++    const QStringList addresses = CustomDevices::sanitized(requestedAddresses);
+ 
+     auto customDevices = config.customDevices();
+     if (customDevices != addresses) {
+diff --git a/core/daemon.h b/core/daemon.h
+index 498c797f5..cbd506152 100644
+--- a/core/daemon.h
++++ b/core/daemon.h
+@@ -32,6 +32,8 @@ public:
+     ~Daemon() override;
+ 
+     static Daemon *instance();
++    // False before the daemon is created, e.g. in tests of parts of it
++    static bool hasInstance();
+ 
+     virtual void askPairingConfirmation(Device *device) = 0;
+     virtual void reportError(const QString &title, const QString &description) = 0;
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index d566b41fe..b562ecaa2 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -22,6 +22,7 @@ ecm_add_test(pluginloadtest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
+ ecm_add_test(sendfiletest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
+ target_sources(sendfiletest PRIVATE testdevice.cpp)
+ ecm_add_test(smshelpertest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
++add_subdirectory(remoteconnect)
+ if (WIN32 OR APPLE)
+     ecm_add_test(mdnstest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
+ endif()
+diff --git a/tests/remoteconnect/CMakeLists.txt b/tests/remoteconnect/CMakeLists.txt
+new file mode 100644
+index 000000000..be08a2118
+--- /dev/null
++++ b/tests/remoteconnect/CMakeLists.txt
+@@ -0,0 +1,22 @@
++function(remoteconnect_test name)
++    ecm_add_test(${name}.cpp ${ARGN} TEST_NAME ${name} LINK_LIBRARIES ${kdeconnect_libraries})
++    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/tests)
++endfunction()
++
++remoteconnect_test(customdevicestest)
++remoteconnect_test(daemoncustomdevicestest)
++remoteconnect_test(customdeviceresolvertest)
++remoteconnect_test(customdeviceretrytest ${CMAKE_SOURCE_DIR}/tests/testdevice.cpp)
++remoteconnect_test(lanlinkprovidertest)
++
++# Settings page of the app, against a stub of the org.kde.kdeconnect QML module
++find_package(Qt6 ${QT_MIN_VERSION} OPTIONAL_COMPONENTS QuickTest)
++if(TARGET Qt6::QuickTest)
++    ecm_add_test(customdevicessettingstest.cpp
++        TEST_NAME customdevicessettingstest
++        LINK_LIBRARIES Qt::QuickTest Qt::Quick KF6::I18n KF6::I18nQml)
++    target_compile_definitions(customdevicessettingstest PRIVATE
++        QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
++        STUB_IMPORT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qmlstub"
++        SETTINGS_QML="${CMAKE_SOURCE_DIR}/app/qml/Settings.qml")
++endif()
+diff --git a/tests/remoteconnect/customdeviceresolvertest.cpp b/tests/remoteconnect/customdeviceresolvertest.cpp
+new file mode 100644
+index 000000000..3556103d5
+--- /dev/null
++++ b/tests/remoteconnect/customdeviceresolvertest.cpp
+@@ -0,0 +1,406 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include <backends/lan/customdeviceresolver.h>
++
++#include <QHash>
++#include <QLoggingCategory>
++#include <QRegularExpression>
++#include <QSignalSpy>
++#include <QTest>
++#include <QTimer>
++
++// Answers lookups from a table, from the event loop, like QHostInfo does.
++class FakeLookup
++{
++public:
++    QHash<QString, QHostInfo> results;
++    QStringList asked;
++    int answered = 0;
++
++    CustomDeviceResolver::Lookup function()
++    {
++        return [this](const QString &hostName, QObject *context, std::function<void(const QHostInfo &)> done) {
++            asked.append(hostName);
++            QHostInfo info = results.value(hostName);
++            // ids of QHostInfo count up from 1: do not abort a real lookup by accident
++            const int id = -1000 - int(asked.size());
++            info.setLookupId(id);
++            QTimer::singleShot(0, context, [this, info, done] {
++                ++answered;
++                done(info);
++            });
++            return id;
++        };
++    }
++
++    static QHostInfo found(const QList<QHostAddress> &addresses)
++    {
++        QHostInfo info;
++        info.setAddresses(addresses);
++        return info;
++    }
++
++    static QHostInfo notFound()
++    {
++        QHostInfo info;
++        info.setError(QHostInfo::HostNotFound);
++        info.setErrorString(QStringLiteral("Host not found"));
++        return info;
++    }
++};
++
++static QList<QHostAddress> addressesOf(const QSignalSpy &spy, int index)
++{
++    return spy.at(index).at(0).value<QList<QHostAddress>>();
++}
++
++class CustomDeviceResolverTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    const QHostAddress phoneV4{QStringLiteral("100.118.129.75")};
++    const QHostAddress phoneV6{QStringLiteral("fd7a:115c:a1e0::1")};
++    const QHostAddress tabletV4{QStringLiteral("100.64.0.9")};
++
++    // The tests with the system resolver look up "localhost". The resolver
++    // passes on IPv4 addresses only (127.0.0.1 here), and nothing for ::1.
++    static const char *missingLocalhostIPv4()
++    {
++        const QList<QHostAddress> addresses = QHostInfo::fromName(QStringLiteral("localhost")).addresses();
++        const bool hasIPv4 = std::any_of(addresses.cbegin(), addresses.cend(), [](const QHostAddress &address) {
++            return address.protocol() == QAbstractSocket::IPv4Protocol;
++        });
++        return hasIPv4 ? nullptr : "\"localhost\" has no IPv4 address on this system";
++    }
++
++    void setWarnings(bool shown)
++    {
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.core.warning=%1").arg(shown ? QStringLiteral("true") : QStringLiteral("false")));
++    }
++
++private Q_SLOTS:
++    void cleanup()
++    {
++        QLoggingCategory::setFilterRules(QString());
++    }
++
++    void addressesAreEmittedAtOnce()
++    {
++        FakeLookup lookup;
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("192.168.1.5"), QStringLiteral("10.0.0.7")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QCOMPARE(spy.count(), 1);
++        const QList<QHostAddress> expected{QHostAddress(QStringLiteral("192.168.1.5")), QHostAddress(QStringLiteral("10.0.0.7"))};
++        QCOMPARE(addressesOf(spy, 0), expected);
++        QVERIFY(lookup.asked.isEmpty());
++    }
++
++    void hostNameIsLookedUpOnEveryResolve()
++    {
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("oppo-reno15-5g"), FakeLookup::found({phoneV4, phoneV6}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("oppo-reno15-5g")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++        QCOMPARE(spy.count(), 0); // asynchronous
++        QTRY_COMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{phoneV4});
++
++        resolver.resolve();
++        QTRY_COMPARE(spy.count(), 2);
++        const QStringList asked{QStringLiteral("oppo-reno15-5g"), QStringLiteral("oppo-reno15-5g")};
++        QCOMPARE(lookup.asked, asked);
++    }
++
++    void eachHostNameIsEmittedSeparately()
++    {
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("phone.example.org"), FakeLookup::found({phoneV4}));
++        lookup.results.insert(QStringLiteral("tablet.example.org"), FakeLookup::found({tabletV4}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("phone.example.org"), QStringLiteral("10.0.0.7"), QStringLiteral("tablet.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{QHostAddress(QStringLiteral("10.0.0.7"))});
++        QTRY_COMPARE(spy.count(), 3);
++        QCOMPARE(addressesOf(spy, 1), QList<QHostAddress>{phoneV4});
++        QCOMPARE(addressesOf(spy, 2), QList<QHostAddress>{tabletV4});
++    }
++
++    // Discovery packets are sent from IPv4 addresses only
++    void onlyIPv4AddressesAreEmitted()
++    {
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("phone.example.org"), FakeLookup::found({phoneV6, QHostAddress(QStringLiteral("::ffff:10.0.0.8")), phoneV4}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("phone.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QTRY_COMPARE(spy.count(), 1);
++        const QList<QHostAddress> expected{QHostAddress(QStringLiteral("10.0.0.8")), phoneV4};
++        QCOMPARE(addressesOf(spy, 0), expected);
++        QCOMPARE(addressesOf(spy, 0).at(0).protocol(), QAbstractSocket::IPv4Protocol);
++    }
++
++    void nameWithoutIPv4IsSkipped_data()
++    {
++        QTest::addColumn<bool>("logging");
++        QTest::newRow("logging shown") << true;
++        QTest::newRow("logging hidden") << false;
++    }
++
++    void nameWithoutIPv4IsSkipped()
++    {
++        QFETCH(bool, logging);
++        QLoggingCategory::setFilterRules(
++            QStringLiteral("kdeconnect.core.warning=%1\nkdeconnect.core.debug=%1").arg(logging ? QStringLiteral("true") : QStringLiteral("false")));
++        QTest::failOnWarning(QRegularExpression(QStringLiteral(".")));
++        if (logging) {
++            QTest::ignoreMessage(QtDebugMsg, "Custom device \"v6.example.org\" has no IPv4 address");
++        }
++
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("v6.example.org"), FakeLookup::found({phoneV6}));
++        lookup.results.insert(QStringLiteral("phone.example.org"), FakeLookup::found({phoneV4}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("v6.example.org"), QStringLiteral("phone.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        // the lookups are answered in order: once the second one is in, the first one was skipped
++        QTRY_COMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{phoneV4});
++    }
++
++    void failedLookupIsSkipped_data()
++    {
++        QTest::addColumn<QHostInfo>("result");
++        QTest::addColumn<bool>("warnings");
++        QTest::addColumn<QString>("message");
++
++        const QString notFound = QStringLiteral("Could not resolve custom device \"gone.example.org\" \"Host not found\"");
++        const QString empty = QStringLiteral("Could not resolve custom device \"gone.example.org\" \"Unknown error\"");
++        QTest::newRow("not found, warning shown") << FakeLookup::notFound() << true << notFound;
++        QTest::newRow("not found, warning hidden") << FakeLookup::notFound() << false << notFound;
++        QTest::newRow("no addresses, warning shown") << FakeLookup::found({}) << true << empty;
++        QTest::newRow("no addresses, warning hidden") << FakeLookup::found({}) << false << empty;
++    }
++
++    void failedLookupIsSkipped()
++    {
++        QFETCH(QHostInfo, result);
++        QFETCH(bool, warnings);
++        QFETCH(QString, message);
++        setWarnings(warnings);
++        if (warnings) {
++            QTest::ignoreMessage(QtWarningMsg, message.toUtf8().constData());
++        }
++
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("gone.example.org"), result);
++        lookup.results.insert(QStringLiteral("phone.example.org"), FakeLookup::found({phoneV4}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("gone.example.org"), QStringLiteral("phone.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        // the lookups are answered in order: once the second one is in, the first one was skipped
++        QTRY_COMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{phoneV4});
++    }
++
++    void unresolvedNameIsWarnedAboutOnce_data()
++    {
++        QTest::addColumn<bool>("logging");
++        QTest::newRow("logging shown") << true;
++        QTest::newRow("logging hidden") << false;
++    }
++
++    // Retries look the name up every minute: one warning when it stops
++    // resolving, debug messages after that.
++    void unresolvedNameIsWarnedAboutOnce()
++    {
++        QFETCH(bool, logging);
++        QLoggingCategory::setFilterRules(
++            QStringLiteral("kdeconnect.core.warning=%1\nkdeconnect.core.debug=%1").arg(logging ? QStringLiteral("true") : QStringLiteral("false")));
++        const char *message = "Could not resolve custom device \"gone.example.org\" \"Host not found\"";
++        QTest::failOnWarning(QRegularExpression(QStringLiteral(".")));
++
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("gone.example.org"), FakeLookup::notFound());
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("gone.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++        const auto resolveOnce = [&lookup, &resolver] {
++            const int answered = lookup.answered + 1;
++            resolver.resolve();
++            return QTest::qWaitFor([&lookup, answered] {
++                return lookup.answered == answered;
++            });
++        };
++
++        if (logging) {
++            QTest::ignoreMessage(QtWarningMsg, message);
++        }
++        QVERIFY(resolveOnce());
++        if (logging) {
++            QTest::ignoreMessage(QtDebugMsg, message);
++            QTest::ignoreMessage(QtDebugMsg, message);
++        }
++        QVERIFY(resolveOnce());
++        QVERIFY(resolveOnce());
++
++        // after it resolved again, the next failure is worth a warning again
++        lookup.results.insert(QStringLiteral("gone.example.org"), FakeLookup::found({phoneV4}));
++        QVERIFY(resolveOnce());
++        QCOMPARE(spy.count(), 1);
++        lookup.results.insert(QStringLiteral("gone.example.org"), FakeLookup::notFound());
++        if (logging) {
++            QTest::ignoreMessage(QtWarningMsg, message);
++        }
++        QVERIFY(resolveOnce());
++    }
++
++    void invalidEntryIsSkipped_data()
++    {
++        QTest::addColumn<bool>("warnings");
++        QTest::newRow("warning shown") << true;
++        QTest::newRow("warning hidden") << false;
++    }
++
++    void invalidEntryIsSkipped()
++    {
++        QFETCH(bool, warnings);
++        setWarnings(warnings);
++        if (warnings) {
++            QTest::ignoreMessage(QtWarningMsg, "Invalid custom device address \"my phone\"");
++        }
++
++        FakeLookup lookup;
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("my phone"), QStringLiteral("192.168.1.5")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{QHostAddress(QStringLiteral("192.168.1.5"))});
++        QVERIFY(lookup.asked.isEmpty());
++    }
++
++    // e.g. stored by an older version, which did not check this
++    void shortIPv4IsSkipped()
++    {
++        QTest::ignoreMessage(QtWarningMsg, "Invalid custom device address \"192.168.1\"");
++        FakeLookup lookup;
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("192.168.1"), QStringLiteral("192.168.1.5")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(addressesOf(spy, 0), QList<QHostAddress>{QHostAddress(QStringLiteral("192.168.1.5"))});
++        QVERIFY(lookup.asked.isEmpty());
++    }
++
++    void cancelDropsPendingLookups()
++    {
++        FakeLookup lookup;
++        lookup.results.insert(QStringLiteral("phone.example.org"), FakeLookup::found({phoneV4}));
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        resolver.setEntries({QStringLiteral("phone.example.org")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++        resolver.cancel();
++        QTest::qWait(50);
++        QCOMPARE(spy.count(), 0);
++
++        // later lookups are answered again
++        resolver.resolve();
++        QTRY_COMPARE(spy.count(), 1);
++    }
++
++    void cancelAbortsSystemLookups()
++    {
++        if (const char *missing = missingLocalhostIPv4()) {
++            QSKIP(missing);
++        }
++        CustomDeviceResolver resolver;
++        resolver.setEntries({QStringLiteral("localhost")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++        resolver.cancel();
++        QTest::qWait(500);
++        QCOMPARE(spy.count(), 0);
++
++        resolver.resolve();
++        QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
++    }
++
++    void noEntriesNoSignal()
++    {
++        FakeLookup lookup;
++        CustomDeviceResolver resolver;
++        resolver.setLookup(lookup.function());
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++        QTest::qWait(50);
++
++        QCOMPARE(spy.count(), 0);
++        QVERIFY(lookup.asked.isEmpty());
++    }
++
++    void defaultLookupUsesTheSystemResolver()
++    {
++        if (const char *missing = missingLocalhostIPv4()) {
++            QSKIP(missing);
++        }
++        CustomDeviceResolver resolver;
++        resolver.setEntries({QStringLiteral("localhost")});
++        QSignalSpy spy(&resolver, &CustomDeviceResolver::addressesResolved);
++
++        resolver.resolve();
++
++        QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 10000);
++        const QList<QHostAddress> addresses = addressesOf(spy, 0);
++        QVERIFY(!addresses.isEmpty());
++        for (const QHostAddress &address : addresses) {
++            QVERIFY2(address.protocol() == QAbstractSocket::IPv4Protocol && address.isLoopback(), qPrintable(address.toString()));
++        }
++    }
++};
++
++QTEST_GUILESS_MAIN(CustomDeviceResolverTest)
++#include "customdeviceresolvertest.moc"
+diff --git a/tests/remoteconnect/customdeviceretrytest.cpp b/tests/remoteconnect/customdeviceretrytest.cpp
+new file mode 100644
+index 000000000..61462c77e
+--- /dev/null
++++ b/tests/remoteconnect/customdeviceretrytest.cpp
+@@ -0,0 +1,234 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "testdaemon.h"
++#include "testdevice.h"
++
++#include <backends/lan/customdeviceretry.h>
++#include <kdeconnectconfig.h>
++
++#include <QSignalSpy>
++#include <QStandardPaths>
++#include <QTest>
++
++using namespace std::chrono_literals;
++
++// TestDevice is always reachable; this one is reachable or not as given.
++class RetryTestDevice : public TestDevice
++{
++public:
++    RetryTestDevice(QObject *parent, const QString &id, bool reachable)
++        : TestDevice(parent, id)
++        , m_reachable(reachable)
++    {
++    }
++    bool isReachable() const override
++    {
++        return m_reachable;
++    }
++
++private:
++    bool m_reachable;
++};
++
++class CustomDeviceRetryTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    TestDaemon *m_daemon = nullptr;
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        QStandardPaths::setTestModeEnabled(true);
++        // devices paired by earlier test runs would be loaded as unreachable
++        const QStringList trusted = KdeConnectConfig::instance().trustedDevices();
++        for (const QString &id : trusted) {
++            KdeConnectConfig::instance().removeTrustedDevice(id);
++        }
++        KdeConnectConfig::instance().setCustomDevices({});
++    }
++
++    // e.g. a LanLinkProvider in a test; the daemon is created further down
++    void noDaemonNoRetry()
++    {
++        QVERIFY(!CustomDeviceRetry::pairedDeviceUnreachable());
++    }
++
++    void defaults()
++    {
++        CustomDeviceRetry retry;
++        QVERIFY(!retry.isActive());
++        QCOMPARE(CustomDeviceRetry::DefaultInterval, 60s);
++        QCOMPARE(retry.interval(), CustomDeviceRetry::DefaultInterval);
++        QCOMPARE(CustomDeviceRetry::DefaultMaximumInterval, 15min);
++        QCOMPARE(retry.maximumInterval(), CustomDeviceRetry::DefaultMaximumInterval);
++    }
++
++    void backsOffWhileRetriesDoNotHelp()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(10ms);
++        retry.setMaximumInterval(50ms);
++        retry.setCondition([] {
++            return true;
++        });
++        QList<std::chrono::milliseconds> intervals;
++        connect(&retry, &CustomDeviceRetry::retryDue, this, [&retry, &intervals] {
++            intervals.append(retry.interval());
++        });
++
++        retry.setActive(true);
++
++        QTRY_VERIFY(intervals.size() >= 5);
++        const QList<std::chrono::milliseconds> expected{10ms, 20ms, 40ms, 50ms, 50ms};
++        QCOMPARE(intervals.mid(0, 5), expected);
++    }
++
++    void backoffIsReset()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(10ms);
++        retry.setMaximumInterval(1h);
++        retry.setCondition([] {
++            return true;
++        });
++        const auto backOff = [&retry] {
++            return QTest::qWaitFor([&retry] {
++                return retry.interval() >= 40ms;
++            });
++        };
++
++        retry.setActive(true);
++        QVERIFY(backOff());
++        retry.setActive(true); // e.g. network change, other list of custom devices
++        QVERIFY(retry.interval() < 40ms);
++
++        QVERIFY(backOff());
++        retry.resetInterval(); // a device connected
++        QVERIFY(retry.interval() < 40ms);
++        QVERIFY(retry.isActive());
++
++        QVERIFY(backOff());
++        retry.retryNow(); // a device went away
++        QVERIFY(retry.interval() < 40ms);
++
++        retry.setActive(false);
++        retry.resetInterval();
++        QVERIFY(!retry.isActive());
++        QCOMPARE(retry.interval(), 10ms);
++    }
++
++    void retriesEveryIntervalWhileConditionHolds()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(20ms);
++        retry.setCondition([] {
++            return true;
++        });
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++
++        retry.setActive(true);
++
++        QVERIFY(retry.isActive());
++        QCOMPARE(spy.count(), 0); // not right away
++        QTRY_VERIFY(spy.count() >= 2);
++    }
++
++    void silentWhileConditionFails()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(20ms);
++        int checks = 0;
++        retry.setCondition([&checks] {
++            ++checks;
++            return false;
++        });
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++
++        retry.setActive(true);
++
++        QTRY_VERIFY(checks >= 2);
++        QCOMPARE(spy.count(), 0);
++        QCOMPARE(retry.interval(), 20ms); // nothing to back off from
++    }
++
++    void stopsWhenInactive()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(20ms);
++        int checks = 0;
++        retry.setCondition([&checks] {
++            ++checks;
++            return true;
++        });
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++
++        retry.setActive(true);
++        retry.setActive(false);
++
++        QVERIFY(!retry.isActive());
++        QTest::qWait(100);
++        QCOMPARE(checks, 0);
++        QCOMPARE(spy.count(), 0);
++    }
++
++    void retryNowWhileActive()
++    {
++        CustomDeviceRetry retry;
++        retry.setInterval(200ms);
++        retry.setCondition([] {
++            return false; // retryNow() does not ask
++        });
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++        retry.setActive(true);
++        QTest::qWait(150);
++
++        retry.retryNow();
++
++        QCOMPARE(spy.count(), 1); // right away
++        QVERIFY(retry.isActive());
++        QVERIFY(retry.remainingTime() > 150ms); // the interval starts again
++    }
++
++    void retryNowWhileInactive()
++    {
++        CustomDeviceRetry retry;
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++
++        retry.retryNow();
++
++        QCOMPARE(spy.count(), 0);
++        QVERIFY(!retry.isActive());
++    }
++
++    void pairedDeviceUnreachable()
++    {
++        m_daemon = new TestDaemon(this);
++        QVERIFY(!CustomDeviceRetry::pairedDeviceUnreachable()); // only the unpaired loopback device
++
++        m_daemon->addDevice(new RetryTestDevice(this, QStringLiteral("retrytest_reachable"), true));
++        QVERIFY(!CustomDeviceRetry::pairedDeviceUnreachable());
++
++        auto *away = new RetryTestDevice(this, QStringLiteral("retrytest_away"), false);
++        m_daemon->addDevice(away);
++        QVERIFY(CustomDeviceRetry::pairedDeviceUnreachable());
++
++        // the default condition drives the retries
++        CustomDeviceRetry retry;
++        retry.setInterval(20ms);
++        QSignalSpy spy(&retry, &CustomDeviceRetry::retryDue);
++        retry.setActive(true);
++        QTRY_VERIFY(spy.count() >= 1);
++
++        away->unpair(); // not paired and not reachable: the daemon forgets it
++        QVERIFY(!CustomDeviceRetry::pairedDeviceUnreachable());
++    }
++};
++
++QTEST_MAIN(CustomDeviceRetryTest)
++#include "customdeviceretrytest.moc"
+diff --git a/tests/remoteconnect/customdevicessettingstest.cpp b/tests/remoteconnect/customdevicessettingstest.cpp
+new file mode 100644
+index 000000000..72504bb2c
+--- /dev/null
++++ b/tests/remoteconnect/customdevicessettingstest.cpp
+@@ -0,0 +1,31 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include <KLocalizedQmlContext>
++#include <KLocalizedString>
++
++#include <QQmlContext>
++#include <QQmlEngine>
++#include <QtQuickTest>
++
++// Runs qml/tst_*.qml with app/qml/Settings.qml as "settingsPageUrl" and a stub
++// org.kde.kdeconnect module instead of the real one (no daemon needed).
++class Setup : public QObject
++{
++    Q_OBJECT
++
++public Q_SLOTS:
++    void qmlEngineAvailable(QQmlEngine *engine)
++    {
++        KLocalizedString::setApplicationDomain("kdeconnect-app");
++        KLocalization::setupLocalizedContext(engine);
++        engine->addImportPath(QStringLiteral(STUB_IMPORT_DIR));
++        engine->rootContext()->setContextProperty(QStringLiteral("settingsPageUrl"), QUrl::fromLocalFile(QStringLiteral(SETTINGS_QML)));
++    }
++};
++
++QUICK_TEST_MAIN_WITH_SETUP(customdevicessettings, Setup)
++#include "customdevicessettingstest.moc"
+diff --git a/tests/remoteconnect/customdevicestest.cpp b/tests/remoteconnect/customdevicestest.cpp
+new file mode 100644
+index 000000000..9932e703a
+--- /dev/null
++++ b/tests/remoteconnect/customdevicestest.cpp
+@@ -0,0 +1,113 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include <backends/lan/customdevices.h>
++
++#include <QLoggingCategory>
++#include <QTest>
++
++class CustomDevicesTest : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void cleanup()
++    {
++        QLoggingCategory::setFilterRules(QString());
++    }
++
++    void isValid_data()
++    {
++        QTest::addColumn<QString>("entry");
++        QTest::addColumn<bool>("valid");
++
++        const QString label63(63, QLatin1Char('a'));
++        const QString name253 = label63 + u'.' + label63 + u'.' + label63 + u'.' + QString(61, QLatin1Char('d'));
++        const QString name254 = name253 + u'd';
++
++        QTest::newRow("IPv4") << QStringLiteral("192.168.1.5") << true;
++        QTest::newRow("Tailscale IPv4") << QStringLiteral("100.118.129.75") << true;
++        // discovery packets are sent from IPv4 addresses only
++        QTest::newRow("IPv6") << QStringLiteral("fd7a:115c:a1e0::1") << false;
++        QTest::newRow("IPv6 with scope") << QStringLiteral("fe80::1%wlp2s0") << false;
++        QTest::newRow("IPv4-mapped IPv6") << QStringLiteral("::ffff:192.168.1.5") << false;
++        QTest::newRow("short name") << QStringLiteral("oppo-reno15-5g") << true;
++        QTest::newRow("MagicDNS name") << QStringLiteral("oppo-reno15-5g.tail1234.ts.net") << true;
++        QTest::newRow("final dot") << QStringLiteral("phone.example.org.") << true;
++        QTest::newRow("label of 63") << label63 << true;
++        QTest::newRow("name of 253") << name253 << true;
++        QTest::newRow("empty") << QString() << false;
++        QTest::newRow("space") << QStringLiteral(" ") << false;
++        QTest::newRow("leading space") << QStringLiteral(" 192.168.1.5") << false;
++        QTest::newRow("trailing tab") << QStringLiteral("phone\t") << false;
++        QTest::newRow("inner space") << QStringLiteral("my phone") << false;
++        QTest::newRow("label starts with -") << QStringLiteral("-phone") << false;
++        QTest::newRow("label ends with -") << QStringLiteral("phone-.example") << false;
++        QTest::newRow("empty label") << QStringLiteral("phone..example") << false;
++        QTest::newRow("only a dot") << QStringLiteral(".") << false;
++        QTest::newRow("label of 64") << QString(64, QLatin1Char('a')) << false;
++        QTest::newRow("name of 254") << name254 << false;
++        QTest::newRow("underscore") << QStringLiteral("my_phone") << false;
++        QTest::newRow("brackets") << QStringLiteral("[fd7a:115c:a1e0::1]") << false;
++        QTest::newRow("URL") << QStringLiteral("http://phone") << false;
++        QTest::newRow("port") << QStringLiteral("phone:1716") << false;
++        QTest::newRow("non-ASCII") << QStringLiteral("téléphone") << false;
++        // IPv4 forms that inet_aton() and QHostAddress accept, but mean another address than they seem to
++        QTest::newRow("IPv4 of three parts") << QStringLiteral("192.168.1") << false;
++        QTest::newRow("IPv4 of two parts") << QStringLiteral("1.2") << false;
++        QTest::newRow("IPv4 as one number") << QStringLiteral("3232235777") << false;
++        QTest::newRow("IPv4 in hex") << QStringLiteral("0x7f.1") << false;
++        QTest::newRow("IPv4 with leading zero") << QStringLiteral("192.168.01.5") << false;
++        QTest::newRow("IPv4 with final dot") << QStringLiteral("192.168.1.5.") << false;
++        // a host name cannot end in a number: these are broken IPv4 addresses
++        QTest::newRow("IPv4 out of range") << QStringLiteral("999.1.1.1") << false;
++        QTest::newRow("IPv4 of five parts") << QStringLiteral("1.2.3.4.5") << false;
++        QTest::newRow("name ending in a number") << QStringLiteral("phone.example.123") << false;
++        QTest::newRow("name with digits in the last label") << QStringLiteral("phone.example.1a") << true;
++        QTest::newRow("name starting with digits") << QStringLiteral("1.2.3.example") << true;
++    }
++
++    void isValid()
++    {
++        QFETCH(QString, entry);
++        QFETCH(bool, valid);
++        QCOMPARE(CustomDevices::isValid(entry), valid);
++    }
++
++    void sanitized_data()
++    {
++        QTest::addColumn<bool>("logging");
++        QTest::newRow("warnings shown") << true;
++        QTest::newRow("warnings hidden") << false;
++    }
++
++    void sanitized()
++    {
++        QFETCH(bool, logging);
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.core.warning=%1").arg(logging ? QStringLiteral("true") : QStringLiteral("false")));
++        if (logging) {
++            QTest::ignoreMessage(QtWarningMsg, "Ignoring invalid custom device address \"my phone\"");
++            QTest::ignoreMessage(QtWarningMsg, "Ignoring invalid custom device address \"\"");
++        }
++
++        const QStringList entries{QStringLiteral(" 192.168.1.5 "),
++                                  QStringLiteral("my phone"),
++                                  QString(),
++                                  QStringLiteral("oppo-reno15-5g"),
++                                  QStringLiteral("192.168.1.5"),
++                                  QStringLiteral("\toppo-reno15-5g")};
++        const QStringList expected{QStringLiteral("192.168.1.5"), QStringLiteral("oppo-reno15-5g")};
++        QCOMPARE(CustomDevices::sanitized(entries), expected);
++    }
++
++    void sanitizedEmpty()
++    {
++        QCOMPARE(CustomDevices::sanitized({}), QStringList());
++    }
++};
++
++QTEST_GUILESS_MAIN(CustomDevicesTest)
++#include "customdevicestest.moc"
+diff --git a/tests/remoteconnect/daemoncustomdevicestest.cpp b/tests/remoteconnect/daemoncustomdevicestest.cpp
+new file mode 100644
+index 000000000..1af49d9e2
+--- /dev/null
++++ b/tests/remoteconnect/daemoncustomdevicestest.cpp
+@@ -0,0 +1,73 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "testdaemon.h"
++
++#include <kdeconnectconfig.h>
++
++#include <QSignalSpy>
++#include <QStandardPaths>
++#include <QTest>
++
++class DaemonCustomDevicesTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    TestDaemon *m_daemon = nullptr;
++    QStringList m_storedOnStart;
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        QStandardPaths::setTestModeEnabled(true);
++        // as an older version could have stored them
++        KdeConnectConfig::instance().setCustomDevices(
++            {QStringLiteral("fd7a:115c:a1e0::1"), QStringLiteral("192.168.1.5"), QStringLiteral("192.168.1"), QStringLiteral("192.168.1.5")});
++        QTest::ignoreMessage(QtWarningMsg, "Ignoring invalid custom device address \"fd7a:115c:a1e0::1\"");
++        QTest::ignoreMessage(QtWarningMsg, "Ignoring invalid custom device address \"192.168.1\"");
++        m_daemon = new TestDaemon(this);
++        m_storedOnStart = KdeConnectConfig::instance().customDevices();
++    }
++
++    void invalidEntriesAreDroppedOnStart()
++    {
++        QCOMPARE(m_storedOnStart, QStringList{QStringLiteral("192.168.1.5")});
++    }
++
++    void init()
++    {
++        KdeConnectConfig::instance().setCustomDevices({});
++    }
++
++    void storesOnlyValidEntries()
++    {
++        QSignalSpy spy(m_daemon, &Daemon::customDevicesChanged);
++
++        m_daemon->setCustomDevices(
++            {QStringLiteral(" 192.168.1.5 "), QStringLiteral("my phone"), QString(), QStringLiteral("oppo-reno15-5g"), QStringLiteral("192.168.1.5")});
++
++        const QStringList expected{QStringLiteral("192.168.1.5"), QStringLiteral("oppo-reno15-5g")};
++        QCOMPARE(m_daemon->customDevices(), expected);
++        QCOMPARE(KdeConnectConfig::instance().customDevices(), expected);
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(spy.at(0).at(0).toStringList(), expected);
++    }
++
++    void sameListAfterCleanupIsNoChange()
++    {
++        m_daemon->setCustomDevices({QStringLiteral("192.168.1.5")});
++        QSignalSpy spy(m_daemon, &Daemon::customDevicesChanged);
++
++        m_daemon->setCustomDevices({QStringLiteral(" 192.168.1.5"), QStringLiteral("my phone")});
++
++        QCOMPARE(spy.count(), 0);
++        QCOMPARE(m_daemon->customDevices(), QStringList{QStringLiteral("192.168.1.5")});
++    }
++};
++
++QTEST_MAIN(DaemonCustomDevicesTest)
++#include "daemoncustomdevicestest.moc"
+diff --git a/tests/remoteconnect/lanlinkprovidertest.cpp b/tests/remoteconnect/lanlinkprovidertest.cpp
+new file mode 100644
+index 000000000..6a03aa285
+--- /dev/null
++++ b/tests/remoteconnect/lanlinkprovidertest.cpp
+@@ -0,0 +1,392 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include <backends/lan/customdeviceresolver.h>
++#include <backends/lan/customdeviceretry.h>
++#include <backends/lan/lanlinkprovider.h>
++#include <kdeconnectconfig.h>
++#include <networkpacket.h>
++
++#include <QLoggingCategory>
++#include <QNetworkDatagram>
++#include <QNetworkInterface>
++#include <QSignalSpy>
++#include <QSslConfiguration>
++#include <QStandardPaths>
++#include <QTcpServer>
++#include <QTest>
++#include <QTimer>
++#include <QUdpSocket>
++
++#ifndef Q_OS_WIN
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <sys/socket.h>
++#endif
++
++// Messages of kdeconnect.core about mDNS, collected by noMdnsInTestMode().
++static QStringList s_mdnsMessages;
++static void collectMdnsMessages(QtMsgType, const QMessageLogContext &context, const QString &message)
++{
++    if (qstrcmp(context.category, "kdeconnect.core") == 0 && message.contains(QLatin1String("mDNS"))) {
++        s_mdnsMessages.append(message);
++    }
++}
++
++// LanLinkProvider sends discovery packets from every non-loopback IPv4 address.
++static bool hasNonLoopbackIPv4Address()
++{
++    const auto interfaces = QNetworkInterface::allInterfaces();
++    for (const QNetworkInterface &iface : interfaces) {
++        if ((iface.flags() & QNetworkInterface::IsUp) && (iface.flags() & QNetworkInterface::IsRunning)) {
++            const auto entries = iface.addressEntries();
++            for (const QNetworkAddressEntry &entry : entries) {
++                if (entry.ip().protocol() == QAbstractSocket::IPv4Protocol && !entry.ip().isLoopback()) {
++                    return true;
++                }
++            }
++        }
++    }
++    return false;
++}
++
++class LanLinkProviderTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    // The "phone": a UDP socket on another loopback address than the provider's 127.0.0.1.
++    const QHostAddress m_phone{QStringLiteral("127.0.0.2")};
++    QUdpSocket m_receiver;
++
++    int m_received = 0;
++
++    // Our own discovery packets that reached m_phone since resetReceived().
++    // (QTRY_VERIFY evaluates its expression once more after it became true.)
++    int received()
++    {
++        while (m_receiver.hasPendingDatagrams()) {
++            const QNetworkDatagram datagram = m_receiver.receiveDatagram();
++            NetworkPacket packet;
++            if (NetworkPacket::unserialize(datagram.data(), &packet)
++                && packet.get<QString>(QStringLiteral("deviceId")) == KdeConnectConfig::instance().deviceId()) {
++                ++m_received;
++            }
++        }
++        return m_received;
++    }
++
++    void resetReceived()
++    {
++        received();
++        m_received = 0;
++    }
++
++    // A second "phone" address, to see that a send happened at all.
++    const QHostAddress m_tablet{QStringLiteral("127.0.0.3")};
++    QUdpSocket m_tabletReceiver;
++
++    int tabletReceived()
++    {
++        int count = 0;
++        while (m_tabletReceiver.hasPendingDatagrams()) {
++            m_tabletReceiver.receiveDatagram();
++            ++count;
++        }
++        return count;
++    }
++
++    // Connects to the provider over TCP from m_phone and goes through the
++    // handshake, so the provider holds a LAN link to m_phone. The phone uses
++    // our own identity and certificate (a link to ourselves, but the provider
++    // does not mind). Returns the phone's end, or nullptr on failure.
++    QSslSocket *connectPhone(LanLinkProvider &provider)
++    {
++        QSignalSpy linked(&provider, &LinkProvider::onConnectionReceived);
++        auto *socket = new QSslSocket(this);
++        if (!socket->bind(m_phone)) {
++            return nullptr;
++        }
++        socket->connectToHost(QHostAddress::LocalHost, provider.tcpPort());
++        if (!socket->waitForConnected()) {
++            return nullptr;
++        }
++        DeviceInfo phone = KdeConnectConfig::instance().deviceInfo();
++        NetworkPacket connectionPacket = phone.toIdentityPacket();
++        connectionPacket.set(QStringLiteral("targetDeviceId"), phone.id);
++        connectionPacket.set(QStringLiteral("targetProtocolVersion"), NetworkPacket::s_protocolVersion);
++        socket->write(connectionPacket.serialize());
++
++        QSslConfiguration sslConfig;
++        sslConfig.setLocalCertificate(KdeConnectConfig::instance().certificate());
++        sslConfig.setPrivateKey(KdeConnectConfig::instance().privateKey());
++        sslConfig.setPeerVerifyMode(QSslSocket::QueryPeer);
++        socket->setSslConfiguration(sslConfig);
++        connect(socket, &QSslSocket::encrypted, socket, [socket, phone]() mutable {
++            socket->write(phone.toIdentityPacket().serialize());
++        });
++        socket->startServerEncryption();
++
++        if (!QTest::qWaitFor([&linked] {
++                return linked.count() == 1;
++            })) {
++            return nullptr;
++        }
++        return socket;
++    }
++
++    bool m_receiversBound = false;
++    static constexpr const char *s_noLoopbackAddresses = "needs the loopback addresses 127.0.0.2 and 127.0.0.3 (not there by default on macOS)";
++
++    // Why the phone and tablet cannot be reached here, or nullptr if they can
++    const char *missingNetwork() const
++    {
++        if (!m_receiversBound) {
++            return s_noLoopbackAddresses;
++        }
++        if (!hasNonLoopbackIPv4Address()) {
++            return "needs a network interface with an IPv4 address to send discovery packets from";
++        }
++        return nullptr;
++    }
++
++    // Resolves every host name to m_phone.
++    CustomDeviceResolver::Lookup lookupToPhone()
++    {
++        return [this](const QString &, QObject *context, std::function<void(const QHostInfo &)> done) {
++            static int id = -1000; // see FakeLookup in customdeviceresolvertest
++            QHostInfo info(--id);
++            info.setAddresses({m_phone});
++            QTimer::singleShot(0, context, [info, done] {
++                done(info);
++            });
++            return id;
++        };
++    }
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        QStandardPaths::setTestModeEnabled(true);
++        m_receiversBound = m_receiver.bind(m_phone, LanLinkProvider::UDP_PORT, QUdpSocket::ShareAddress)
++            && m_tabletReceiver.bind(m_tablet, LanLinkProvider::UDP_PORT, QUdpSocket::ShareAddress);
++    }
++
++    void cleanup()
++    {
++        KdeConnectConfig::instance().setCustomDevices({});
++        resetReceived();
++        tabletReceived();
++    }
++
++    void noMdnsInTestMode()
++    {
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.core=true"));
++        const QtMessageHandler previousHandler = qInstallMessageHandler(collectMdnsMessages);
++        s_mdnsMessages.clear();
++        {
++            const LanLinkProvider normal(false, true); // disabled: never started
++        }
++        const QStringList normalMessages = s_mdnsMessages;
++        s_mdnsMessages.clear();
++        {
++            const LanLinkProvider testMode(true);
++        }
++        qInstallMessageHandler(previousHandler);
++        QLoggingCategory::setFilterRules(QString());
++
++#if !defined(Q_OS_WIN) && !defined(Q_OS_MAC)
++        QCOMPARE(normalMessages.size(), 1); // "Using Avahi for mDNS discovery" or "Using mdnsh for mDNS discovery"
++#else
++        Q_UNUSED(normalMessages);
++#endif
++        QCOMPARE(s_mdnsMessages, QStringList());
++    }
++
++    void sendsToCustomDeviceHostNames()
++    {
++        if (const char *missing = missingNetwork()) {
++            QSKIP(missing);
++        }
++        KdeConnectConfig::instance().setCustomDevices({QStringLiteral("phone.example.org")});
++        LanLinkProvider provider(true);
++        auto *resolver = provider.findChild<CustomDeviceResolver *>();
++        QVERIFY(resolver);
++        resolver->setLookup(lookupToPhone());
++
++        provider.onStart();
++
++        QTRY_VERIFY(received() > 0);
++        provider.onStop();
++    }
++
++    void retriesWhileStarted()
++    {
++        if (const char *missing = missingNetwork()) {
++            QSKIP(missing);
++        }
++        KdeConnectConfig::instance().setCustomDevices({m_phone.toString()});
++        LanLinkProvider provider(true);
++        auto *retry = provider.findChild<CustomDeviceRetry *>();
++        QVERIFY(retry);
++
++        provider.onStart();
++        QVERIFY(retry->isActive());
++        QTRY_VERIFY(received() > 0);
++
++        resetReceived();
++        Q_EMIT retry->retryDue();
++        QTRY_VERIFY(received() > 0);
++
++        resetReceived();
++        provider.onNetworkChange();
++        QTRY_VERIFY(received() > 0);
++
++        provider.onStop();
++        QVERIFY(!retry->isActive());
++    }
++
++    void connectedCustomDeviceIsNotSentTo()
++    {
++        if (const char *missing = missingNetwork()) {
++            QSKIP(missing);
++        }
++        // the phone by host name, so that it is resolved on its own
++        KdeConnectConfig::instance().setCustomDevices({m_tablet.toString(), QStringLiteral("phone.example.org")});
++        LanLinkProvider provider(true);
++        auto *resolver = provider.findChild<CustomDeviceResolver *>();
++        auto *retry = provider.findChild<CustomDeviceRetry *>();
++        QVERIFY(resolver);
++        QVERIFY(retry);
++        resolver->setLookup(lookupToPhone());
++        provider.onStart();
++        QTRY_VERIFY(received() > 0);
++
++        QSslSocket *phone = connectPhone(provider);
++        QVERIFY(phone);
++        resetReceived();
++        tabletReceived();
++
++        QSignalSpy resolved(resolver, &CustomDeviceResolver::addressesResolved);
++        Q_EMIT retry->retryDue();
++        QTRY_COMPARE(resolved.count(), 2); // the tablet's address, then the phone's
++        QVERIFY(tabletReceived() > 0);
++        QCOMPARE(received(), 0);
++
++        delete phone;
++        provider.onStop();
++    }
++
++    void lostLinkTriggersImmediateRetry()
++    {
++        if (const char *missing = missingNetwork()) {
++            QSKIP(missing);
++        }
++        KdeConnectConfig::instance().setCustomDevices({m_phone.toString()});
++        LanLinkProvider provider(true);
++        provider.onStart();
++        QTRY_VERIFY(received() > 0);
++        QSslSocket *phone = connectPhone(provider);
++        QVERIFY(phone);
++        resetReceived();
++
++        phone->abort(); // the link goes away; the next retry would be a minute later
++
++        QTRY_VERIFY(received() > 0);
++        delete phone;
++        provider.onStop();
++    }
++
++    void connectingDeviceResetsBackoff()
++    {
++        if (!m_receiversBound) {
++            QSKIP(s_noLoopbackAddresses);
++        }
++        using namespace std::chrono_literals;
++        KdeConnectConfig::instance().setCustomDevices({m_tablet.toString()});
++        LanLinkProvider provider(true);
++        auto *retry = provider.findChild<CustomDeviceRetry *>();
++        QVERIFY(retry);
++        retry->setCondition([] {
++            return true;
++        });
++        retry->setInterval(10ms);
++        retry->setMaximumInterval(1h);
++        provider.onStart();
++        // backing off again from 10ms to 1280ms takes more than a second
++        QTRY_VERIFY(retry->interval() >= 1280ms);
++
++        QSslSocket *phone = connectPhone(provider);
++        QVERIFY(phone);
++
++        QVERIFY(retry->interval() < 1280ms);
++        delete phone;
++        provider.onStop();
++    }
++
++    void noSendAfterStop()
++    {
++        if (const char *missing = missingNetwork()) {
++            QSKIP(missing);
++        }
++        KdeConnectConfig::instance().setCustomDevices({QStringLiteral("phone.example.org")});
++        LanLinkProvider provider(true);
++        auto *resolver = provider.findChild<CustomDeviceResolver *>();
++        QVERIFY(resolver);
++        resolver->setLookup(lookupToPhone());
++
++        provider.onStart();
++        provider.onStop(); // before the name is looked up
++        QTest::qWait(100);
++        QCOMPARE(received(), 0);
++
++        // whatever the resolver still has to say
++        Q_EMIT resolver->addressesResolved({m_phone});
++        QCOMPARE(received(), 0);
++
++        provider.onStart();
++        QTRY_VERIFY(received() > 0);
++        resetReceived();
++        provider.disable();
++        Q_EMIT resolver->addressesResolved({m_phone});
++        QCOMPARE(received(), 0);
++    }
++
++    void noRetryWithoutCustomDevices()
++    {
++        LanLinkProvider provider(true);
++        auto *retry = provider.findChild<CustomDeviceRetry *>();
++        QVERIFY(retry);
++
++        provider.onStart();
++
++        QVERIFY(!retry->isActive());
++        provider.onStop();
++    }
++
++    void configureSocketSetsUserTimeout()
++    {
++#ifndef TCP_USER_TIMEOUT
++        QSKIP("TCP_USER_TIMEOUT is not available on this platform");
++#else
++        QTcpServer server;
++        QVERIFY(server.listen(QHostAddress::LocalHost));
++        QSslSocket socket;
++        socket.connectToHost(QHostAddress::LocalHost, server.serverPort());
++        QVERIFY(socket.waitForConnected());
++
++        LanLinkProvider::configureSocket(&socket);
++
++        unsigned int timeout = 0;
++        socklen_t length = sizeof(timeout);
++        QCOMPARE(getsockopt(socket.socketDescriptor(), IPPROTO_TCP, TCP_USER_TIMEOUT, &timeout, &length), 0);
++        QCOMPARE(timeout, 60000u);
++#endif
++    }
++};
++
++QTEST_GUILESS_MAIN(LanLinkProviderTest)
++#include "lanlinkprovidertest.moc"
+diff --git a/tests/remoteconnect/qml/tst_customdevices.qml b/tests/remoteconnect/qml/tst_customdevices.qml
+new file mode 100644
+index 000000000..66d2acf0e
+--- /dev/null
++++ b/tests/remoteconnect/qml/tst_customdevices.qml
+@@ -0,0 +1,122 @@
++// SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++
++import QtQuick
++import QtTest
++import org.kde.kdeconnect
++
++TestCase {
++    id: testCase
++    name: "CustomDevicesSettings"
++    width: 800
++    height: 1000
++    when: windowShown
++
++    function createPage() {
++        const component = Qt.createComponent(settingsPageUrl);
++        compare(component.status, Component.Ready, component.errorString());
++        const page = createTemporaryObject(component, testCase, {width: testCase.width, height: testCase.height});
++        verify(page !== null);
++        verify(findChild(page, "customDevicesRepeater") !== null, "no list of custom devices");
++        verify(findChild(page, "customDeviceField") !== null, "no field for a new custom device");
++        return page;
++    }
++
++    function devices() {
++        return Array.from(DaemonDbusInterface.customDevices);
++    }
++
++    function init() {
++        DaemonDbusInterface.customDevices = ["192.168.1.5"];
++    }
++
++    function test_listsCustomDevices() {
++        const repeater = findChild(createPage(), "customDevicesRepeater");
++        compare(repeater.count, 1);
++        compare(repeater.itemAt(0).text, "192.168.1.5");
++    }
++
++    function test_addsTrimmedEntry() {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = "  phone.example.org ";
++        page.addCustomDevice();
++        compare(devices(), ["192.168.1.5", "phone.example.org"]);
++        compare(field.text, "");
++        compare(field.statusMessage, "");
++        compare(findChild(page, "customDevicesRepeater").count, 2);
++    }
++
++    function test_existingEntryIsNotAddedTwice() {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = "192.168.1.5";
++        page.addCustomDevice();
++        compare(devices(), ["192.168.1.5"]);
++        compare(field.text, "");
++    }
++
++    function test_emptyEntryIsIgnored() {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = "   ";
++        page.addCustomDevice();
++        compare(devices(), ["192.168.1.5"]);
++        compare(field.statusMessage, "");
++    }
++
++    function test_rejectedEntryShowsError_data() {
++        return [
++            {tag: "invalid", address: "my phone", message: "\"my phone\" is not a valid IP address or host name."},
++            {tag: "IPv6", address: "fd7a:115c:a1e0::1", message: "Only IPv4 addresses and host names are supported."},
++        ];
++    }
++
++    function test_rejectedEntryShowsError(data) {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = data.address;
++        page.addCustomDevice();
++        compare(devices(), ["192.168.1.5"]);
++        compare(field.text, data.address);
++        compare(field.statusMessage, data.message);
++    }
++
++    function test_errorGoesAwayWhenEditing() {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = "my phone";
++        page.addCustomDevice();
++        verify(field.statusMessage.length > 0);
++        field.text = "my-phone";
++        compare(field.statusMessage, "");
++    }
++
++    // host names are case-insensitive, and "phone.example.org." is "phone.example.org"
++    function test_hostNameIsNormalized() {
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = " Phone.Example.ORG. ";
++        page.addCustomDevice();
++        compare(devices(), ["192.168.1.5", "phone.example.org"]);
++        compare(field.text, "");
++    }
++
++    function test_sameHostNameIsNotAddedTwice() {
++        DaemonDbusInterface.customDevices = ["Phone.example.org"]; // stored by an older version
++        const page = createPage();
++        const field = findChild(page, "customDeviceField");
++        field.text = "PHONE.example.org.";
++        page.addCustomDevice();
++        compare(devices(), ["Phone.example.org"]);
++        compare(field.text, "");
++        compare(field.statusMessage, "");
++    }
++
++    function test_removesEntry() {
++        const page = createPage();
++        page.removeCustomDevice("192.168.1.5");
++        compare(devices(), []);
++        compare(findChild(page, "customDevicesRepeater").count, 0);
++    }
++}
+diff --git a/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DBusProperty.qml b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DBusProperty.qml
+new file mode 100644
+index 000000000..e1a37dcb0
+--- /dev/null
++++ b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DBusProperty.qml
+@@ -0,0 +1,12 @@
++// SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++
++import QtQml
++
++// Always holds its default value.
++QtObject {
++    property QtObject object
++    property string read
++    property var defaultValue
++    readonly property var value: defaultValue
++}
+diff --git a/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DaemonDbusInterface.qml b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DaemonDbusInterface.qml
+new file mode 100644
+index 000000000..2555ad8d8
+--- /dev/null
++++ b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/DaemonDbusInterface.qml
+@@ -0,0 +1,20 @@
++// SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++
++// Stands in for the D-Bus interface of kdeconnectd. Like the daemon, it drops
++// entries it does not accept (here: anything with whitespace, and IPv6).
++pragma Singleton
++
++import QtQml
++
++QtObject {
++    property list<string> customDevices: []
++    onCustomDevicesChanged: {
++        const valid = customDevices.filter(entry => !/[\s:]/.test(entry));
++        if (valid.length !== customDevices.length) {
++            customDevices = valid;
++        }
++    }
++    function setAnnouncedName(name: string): void {}
++    function setLinkProviderState(name: string, enabled: bool): void {}
++}
+diff --git a/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/StubItem.qml b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/StubItem.qml
+new file mode 100644
+index 000000000..f0439c43b
+--- /dev/null
++++ b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/StubItem.qml
+@@ -0,0 +1,7 @@
++// SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++// SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++
++import QtQml
++
++// A QML module needs at least one type to be importable.
++QtObject {}
+diff --git a/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/qmldir b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/qmldir
+new file mode 100644
+index 000000000..a2ba363c2
+--- /dev/null
++++ b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/app/qmldir
+@@ -0,0 +1,2 @@
++module org.kde.kdeconnect.app
++StubItem 1.0 StubItem.qml
+diff --git a/tests/remoteconnect/qmlstub/org/kde/kdeconnect/qmldir b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/qmldir
+new file mode 100644
+index 000000000..d69bb098b
+--- /dev/null
++++ b/tests/remoteconnect/qmlstub/org/kde/kdeconnect/qmldir
+@@ -0,0 +1,3 @@
++module org.kde.kdeconnect
++singleton DaemonDbusInterface 1.0 DaemonDbusInterface.qml
++DBusProperty 1.0 DBusProperty.qml

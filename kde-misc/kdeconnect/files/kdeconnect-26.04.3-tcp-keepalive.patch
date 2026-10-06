@@ -1,0 +1,41 @@
+TCP keepalive tuning from kdeconnect-kde master, backported to 26.04.3:
+upstream 31c755d22 "Tune TCP keepalive to 60s for dead connection detection"
+and 51dfea90b "Fix TCP keepalive tuning being compiled out on macOS"
+(BUG 476747). Not in 26.04.x; needed by the remote-connect patch.
+
+Generated with: git diff v26.04.3 <pick of 51dfea90b> on branch stable-26.04.3.
+Applies with -p1 to kdeconnect-kde-26.04.3.tar.xz, also after the ::gentoo
+patches of kde-misc/kdeconnect-26.04.3-r3.
+
+diff --git a/core/backends/lan/lanlinkprovider.cpp b/core/backends/lan/lanlinkprovider.cpp
+index ac07212ee..ecf852108 100644
+--- a/core/backends/lan/lanlinkprovider.cpp
++++ b/core/backends/lan/lanlinkprovider.cpp
+@@ -616,6 +616,27 @@ void LanLinkProvider::configureSocket(QSslSocket *socket)
+ {
+     socket->setProxy(QNetworkProxy::NoProxy);
+     socket->setSocketOption(QAbstractSocket::KeepAliveOption, QVariant(1));
++
++#if defined(TCP_KEEPIDLE) || defined(TCP_KEEPALIVE)
++    // Detect dead connections in ~60s instead of the system default (~7875s on
++    // Linux, ~7800s on macOS). Without this, a phone that silently disappears
++    // (e.g. WiFi off) leaves a stale connection where isReachable() remains true
++    // and sends fail without any user-visible error (BUG 476747).
++    int fd = socket->socketDescriptor();
++    if (fd >= 0) {
++        int idle = 30; // seconds before first keepalive probe
++        int intvl = 10; // seconds between probes
++        int cnt = 3; // failed probes before connection is dropped
++#ifdef TCP_KEEPIDLE
++        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
++#else
++        // Darwin has no TCP_KEEPIDLE, TCP_KEEPALIVE is its equivalent
++        setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof(idle));
++#endif
++        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
++        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
++    }
++#endif
+ }
+ 
+ void LanLinkProvider::addLink(QSslSocket *socket, const DeviceInfo &deviceInfo)

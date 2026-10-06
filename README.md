@@ -206,7 +206,7 @@ also keeps systemd-networkd from deleting the rule. After installing, run
 Full explanation, diagnosis, configuration and a non-Gentoo version:
 [docs/tailscale-lan-route.md](docs/tailscale-lan-route.md).
 
-### KDE Connect with location sharing — `kde-misc/kdeconnect`
+### KDE Connect with location sharing and remote connect — `kde-misc/kdeconnect`
 
 The `::gentoo` ebuild of KDE Connect with an extra **geolocation plugin**
 (the desktop side of
@@ -219,10 +219,10 @@ The phone sends its GPS position; the plugin
 - asks the phone for its location **only while someone listens** (an NMEA
   client or a D-Bus caller) and tells it to stop afterwards.
 
-The NMEA output is off by default. The patch is pending upstream review; this
-copy (revision `-r100`, so it wins over `::gentoo`) is dropped again once the
-plugin is merged into KDE Connect. When `::gentoo` bumps KDE Connect, the patch
-is rebased and a new `-r100` is added here.
+The NMEA output is off by default. The patches are pending upstream review; this
+copy (revision `-r101`, so it wins over `::gentoo`) is dropped again once the
+plugins are merged into KDE Connect. When `::gentoo` bumps KDE Connect, the patches
+are rebased and a new `-r101` is added here.
 
 The phone needs a KDE Connect build that includes MR !529 (the release on
 Google Play/F-Droid does not yet), and the plugin must be enabled for the
@@ -232,6 +232,16 @@ device. To use the phone as a GPS in QMapShack:
    enable **Offer this device's location to applications** (port 10110).
 2. QMapShack → *Realtime* → add source *GPS Tether* → host `localhost`,
    port `10110`, *auto. conn.*
+
+**Remote connect** (KDE Connect over a VPN such as Tailscale, pending upstream
+review): in the KDE Connect app's settings, *Devices by Address* takes IPv4
+addresses **or host names** (e.g. the phone's MagicDNS name). KDE Connect
+sends its discovery packet to them on start and on network changes, right away
+when a connection drops, and then again while a paired device is unreachable
+(after one minute, backing off to every 15 minutes), so the phone reconnects
+over the VPN by itself after it left the home Wi-Fi. A connection that stops
+acknowledging data is dropped after 60 s instead of hanging for many minutes.
+Also included: the upstream TCP keepalive tuning from master (not in 26.04).
 
 ## Installation
 
@@ -303,7 +313,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `dev-python/standardwebhooks` | 1.0.1 | Standard Webhooks reference library | MIT | copy from `::guru`; anthropic test dependency |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
-| `kde-misc/kdeconnect` | 26.04.3-r100 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) | GPL-2+ | `::gentoo` ebuild + patch; needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
+| `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |

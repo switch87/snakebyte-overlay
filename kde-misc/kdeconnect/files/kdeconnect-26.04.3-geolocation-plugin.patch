@@ -1,15 +1,13 @@
 KDE Connect geolocation plugin (desktop side of kdeconnect-android!529),
-backported to kdeconnect-kde 26.04.3.
+backported to kdeconnect-kde 26.04.3, plus upstream 6c1238802 "Flip
+capabilities in loopbackdevice" (in master, not in 26.04.x; needed for
+tests/pluginloadtest to see the plugin as supported).
 
-Generated with: git diff v26.04.3 on branch geolocation-26.04.3 =
-  v26.04.3 + the geolocation-nmea commits (without the development-only
-  coverage script commit 2bd59de57)
-  + upstream 6c1238802 "Flip capabilities in loopbackdevice" (in master,
-    not in 26.04.x; only affects the loopback test device and is needed
-    for tests/pluginloadtest to see the geolocation plugin as supported).
-
-Applies with -p1 to kdeconnect-kde-26.04.3.tar.xz, also after the ::gentoo
-patches of kde-misc/kdeconnect-26.04.3-r3.
+Generated with: git diff <pick of 51dfea90b> <last geolocation commit> on
+branch stable-26.04.3 (the same diff as git diff v26.04.3 geolocation-26.04.3:
+the geolocation-nmea commits without the development-only coverage script
+commit 2bd59de57, plus 6c1238802).
+Applies with -p1 after kdeconnect-26.04.3-tcp-keepalive.patch.
 
 diff --git a/core/backends/loopback/loopbackdevicelink.cpp b/core/backends/loopback/loopbackdevicelink.cpp
 index 1c5d1138e..0e57cb5cf 100644
@@ -26,6 +24,20 @@ index 1c5d1138e..0e57cb5cf 100644
  }
  
  #include "moc_loopbackdevicelink.cpp"
+diff --git a/core/device.cpp b/core/device.cpp
+index e37db762c..db8f044fd 100644
+--- a/core/device.cpp
++++ b/core/device.cpp
+@@ -274,6 +274,9 @@ void Device::pairingHandler_unpaired()
+ void Device::addLink(DeviceLink *link)
+ {
+     if (d->m_deviceLinks.contains(link)) {
++        // A backend that reuses its link for a new connection (LAN) offers it
++        // again: its address may have changed and the other side starts afresh.
++        Q_EMIT linksChanged();
+         return;
+     }
+ 
 diff --git a/plugins/CMakeLists.txt b/plugins/CMakeLists.txt
 index 6e1135089..fa2f80a56 100644
 --- a/plugins/CMakeLists.txt
@@ -251,10 +263,10 @@ index 000000000..4b6cc45c7
 +};
 diff --git a/plugins/geolocation/geolocationplugin.cpp b/plugins/geolocation/geolocationplugin.cpp
 new file mode 100644
-index 000000000..229ae3bd6
+index 000000000..c0b0723c2
 --- /dev/null
 +++ b/plugins/geolocation/geolocationplugin.cpp
-@@ -0,0 +1,193 @@
+@@ -0,0 +1,198 @@
 +/**
 + * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
 + *
@@ -288,6 +300,11 @@ index 000000000..229ae3bd6
 +    connect(device(), &QObject::destroyed, this, [this]() {
 +        m_deviceGone = true;
 +    });
++    // The phone forgets the request whenever its connection is re-established.
++    // While the device stays reachable that reloads no plugins (no connected()),
++    // the device only signals that its links changed. That includes a link going
++    // away while others remain; asking again then does no harm.
++    connect(device(), &Device::linksChanged, &m_demand, &DemandTracker::resend);
 +    applyConfig();
 +}
 +
@@ -1193,10 +1210,10 @@ index 000000000..8bbb13eeb
 +#include "demandtrackertest.moc"
 diff --git a/tests/geolocation/geolocationplugintest.cpp b/tests/geolocation/geolocationplugintest.cpp
 new file mode 100644
-index 000000000..4e12a06ec
+index 000000000..588131267
 --- /dev/null
 +++ b/tests/geolocation/geolocationplugintest.cpp
-@@ -0,0 +1,453 @@
+@@ -0,0 +1,493 @@
 +/**
 + * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
 + *
@@ -1207,6 +1224,7 @@ index 000000000..4e12a06ec
 +#include "testdaemon.h"
 +#include "testdevice.h"
 +
++#include <core/backends/linkprovider.h>
 +#include <core/kdeconnectconfig.h>
 +
 +#include <QDBusConnection>
@@ -1518,6 +1536,45 @@ index 000000000..4e12a06ec
 +        QCOMPARE(m_device->getSentPackets(), before + 1);
 +        QVERIFY(m_device->getLastPacket());
 +        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), true);
++    }
++
++    // The phone forgets the request when its connection is re-established. If
++    // the device stays reachable meanwhile, its plugins are not reloaded and
++    // connected() is not called; the device only signals linksChanged().
++    void newLinkResendsEnable()
++    {
++        Q_EMIT m_device->linksChanged(); // idle: nothing to ask again
++        QCOMPARE(m_device->getSentPackets(), 0);
++
++        m_plugin->start();
++        const int before = m_device->getSentPackets();
++        Q_EMIT m_device->linksChanged();
++        QCOMPARE(m_device->getSentPackets(), before + 1);
++        QVERIFY(m_device->getLastPacket());
++        QCOMPARE(m_device->getLastPacket()->type(), PACKET_TYPE_GEOLOCATION_REQUEST);
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), true);
++    }
++
++    // The LAN backend does not create a new link when a device connects again:
++    // it gives the existing link the new socket and offers it again. The
++    // device has to signal that as well.
++    void reconnectionOverAnExistingLinkSignalsLinksChanged()
++    {
++        // In test mode the only backend is the loopback one, which connects
++        // this computer to itself.
++        QCOMPARE(m_daemon->getLinkProviders().size(), 1);
++        LinkProvider *loopback = *m_daemon->getLinkProviders().cbegin();
++        Device *self = m_daemon->getDevice(KdeConnectConfig::instance().deviceId());
++        QVERIFY(self);
++        QSignalSpy connections(loopback, &LinkProvider::onConnectionReceived);
++        loopback->onNetworkChange(); // a new link, the daemon adds it to self
++        QCOMPARE(connections.size(), 1);
++        auto *link = static_cast<DeviceLink *>(connections.at(0).at(0).value<QObject *>());
++        QVERIFY(link);
++
++        QSignalSpy linksChanged(self, &Device::linksChanged);
++        self->addLink(link); // what the daemon does when that link is offered again
++        QCOMPARE(linksChanged.size(), 1);
 +    }
 +
 +    void disablingClosesServerAndPortChangeRelistens()

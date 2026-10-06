@@ -6,9 +6,13 @@
 		<name>Gert Pellin</name>
 	</maintainer>
 	<longdescription>
-		The ::gentoo ebuild with the geolocation plugin added: receives the
-		phone's location (kdeconnect-android MR !529) and offers it as NMEA on
-		localhost and on D-Bus. Dropped again once upstream merges the plugin.
+		The ::gentoo ebuild with three additions: the geolocation plugin
+		(receives the phone's location, kdeconnect-android MR !529, and offers
+		it as NMEA on localhost and on D-Bus); remote connect (custom devices
+		by IP address or host name, e.g. over Tailscale, retried with backoff
+		while a paired device is unreachable, dead links dropped after 60 s,
+		a settings section in the app); and the upstream TCP keepalive tuning
+		from master. Dropped again once upstream has all three.
 	</longdescription>
 	<upstream>
 		<bugs-to>https://bugs.kde.org/enter_bug.cgi?product=kdeconnect</bugs-to>
