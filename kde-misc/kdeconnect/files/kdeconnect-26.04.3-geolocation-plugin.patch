@@ -1,0 +1,2132 @@
+KDE Connect geolocation plugin (desktop side of kdeconnect-android!529),
+backported to kdeconnect-kde 26.04.3.
+
+Generated with: git diff v26.04.3 on branch geolocation-26.04.3 =
+  v26.04.3 + the geolocation-nmea commits (without the development-only
+  coverage script commit 2bd59de57)
+  + upstream 6c1238802 "Flip capabilities in loopbackdevice" (in master,
+    not in 26.04.x; only affects the loopback test device and is needed
+    for tests/pluginloadtest to see the geolocation plugin as supported).
+
+Applies with -p1 to kdeconnect-kde-26.04.3.tar.xz, also after the ::gentoo
+patches of kde-misc/kdeconnect-26.04.3-r3.
+
+diff --git a/core/backends/loopback/loopbackdevicelink.cpp b/core/backends/loopback/loopbackdevicelink.cpp
+index 1c5d1138e..0e57cb5cf 100644
+--- a/core/backends/loopback/loopbackdevicelink.cpp
++++ b/core/backends/loopback/loopbackdevicelink.cpp
+@@ -33,7 +33,9 @@ bool LoopbackDeviceLink::sendPacket(NetworkPacket &input)
+ 
+ DeviceInfo LoopbackDeviceLink::deviceInfo() const
+ {
+-    return KdeConnectConfig::instance().deviceInfo();
++    DeviceInfo deviceInfo = KdeConnectConfig::instance().deviceInfo();
++    deviceInfo.incomingCapabilities.swap(deviceInfo.outgoingCapabilities);
++    return deviceInfo;
+ }
+ 
+ #include "moc_loopbackdevicelink.cpp"
+diff --git a/plugins/CMakeLists.txt b/plugins/CMakeLists.txt
+index 6e1135089..fa2f80a56 100644
+--- a/plugins/CMakeLists.txt
++++ b/plugins/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ add_definitions(-DTRANSLATION_DOMAIN=\"kdeconnect-plugins\")
+ 
+ add_subdirectory(ping)
++add_subdirectory(geolocation)
+ add_subdirectory(connectivity-report)
+ add_subdirectory(remotecommands)
+ add_subdirectory(remotecontrol)
+diff --git a/plugins/geolocation/CMakeLists.txt b/plugins/geolocation/CMakeLists.txt
+new file mode 100644
+index 000000000..b99c61e1c
+--- /dev/null
++++ b/plugins/geolocation/CMakeLists.txt
+@@ -0,0 +1,14 @@
++kdeconnect_add_plugin(kdeconnect_geolocation SOURCES
++    geolocationpluginfactory.cpp
++    geolocationplugin.cpp
++    nmea.cpp
++    nmeaserver.cpp
++    demandtracker.cpp
++)
++target_link_libraries(kdeconnect_geolocation
++    kdeconnectcore
++    Qt::DBus
++    Qt::Network
++    KF6::I18n
++)
++install(FILES kdeconnect_geolocation_config.qml DESTINATION ${KDE_INSTALL_DATADIR}/kdeconnect)
+diff --git a/plugins/geolocation/README b/plugins/geolocation/README
+new file mode 100644
+index 000000000..05006af00
+--- /dev/null
++++ b/plugins/geolocation/README
+@@ -0,0 +1,31 @@
++The geolocation plugin receives the location of the other device (sent by the
++"Location sharing" plugin of KDE Connect for Android as NMEA 0183 sentences in
++kdeconnect.geolocation.nmea packets) and offers it to applications:
++
++- as an NMEA 0183 stream on a TCP port on localhost (127.0.0.1 only). This is
++  off by default; enable it and pick the port (default 10110) in the plugin
++  settings; each device needs its own port. Ports outside 1..65535 are
++  rejected with a warning and a notification. At most 16 clients are served
++  at a time; a client that does not keep up with the stream (more than 64 KiB
++  unsent) is disconnected.
++- on D-Bus: /modules/kdeconnect/devices/<id>/geolocation,
++  org.kde.kdeconnect.device.geolocation (properties latitude, longitude,
++  altitude, speed, bearing, timestamp, isActive; signals locationChanged,
++  activeChanged; methods start(), stop()). RMC sentences set the position,
++  speed, bearing and timestamp; GGA sentences set the position and altitude
++  but not the timestamp. Each caller of start() keeps the location running
++  until it calls stop() or leaves the bus, so "qdbus ... start" from a shell
++  stops about 30 seconds after qdbus exits; long-running clients call start()
++  and keep their bus connection. This works independently of the NMEA output
++  setting: any process of the session can already use KDE Connect's D-Bus
++  API.
++
++The device is asked to send its location (kdeconnect.geolocation.request
++{"enable": true}) only while a TCP client is connected or a D-Bus caller
++wants it. 30 seconds after that ends it is asked to stop ({"enable": false}).
++It is also told to stop when the plugin is unloaded while the location is
++active and the device is still paired and reachable.
++
++QMapShack: Realtime -> add source "GPS Tether", host localhost, port 10110,
++"auto. conn.". Other NMEA-over-TCP readers (gpsd: gpsd tcp://localhost:10110,
++OpenCPN, Navit) work the same way.
+diff --git a/plugins/geolocation/demandtracker.cpp b/plugins/geolocation/demandtracker.cpp
+new file mode 100644
+index 000000000..44afcddff
+--- /dev/null
++++ b/plugins/geolocation/demandtracker.cpp
+@@ -0,0 +1,73 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "demandtracker.h"
++
++DemandTracker::DemandTracker(QObject *parent)
++    : QObject(parent)
++{
++    m_stopTimer.setSingleShot(true);
++    m_stopTimer.setInterval(30000);
++    connect(&m_stopTimer, &QTimer::timeout, this, &DemandTracker::stop);
++}
++
++void DemandTracker::setStopDelay(int msec)
++{
++    m_stopTimer.setInterval(msec);
++}
++
++int DemandTracker::stopDelay() const
++{
++    return m_stopTimer.interval();
++}
++
++void DemandTracker::setClientCount(int count)
++{
++    m_clients = count;
++    evaluate();
++}
++
++void DemandTracker::setDbusDemand(bool wanted)
++{
++    m_dbus = wanted;
++    evaluate();
++}
++
++bool DemandTracker::isActive() const
++{
++    return m_active;
++}
++
++void DemandTracker::resend()
++{
++    if (m_active) {
++        Q_EMIT enableRequested(true);
++    }
++}
++
++void DemandTracker::evaluate()
++{
++    const bool wanted = m_clients > 0 || m_dbus;
++    if (wanted) {
++        m_stopTimer.stop();
++        if (!m_active) {
++            m_active = true;
++            Q_EMIT enableRequested(true);
++            Q_EMIT activeChanged(true);
++        }
++    } else if (m_active && !m_stopTimer.isActive()) {
++        m_stopTimer.start();
++    }
++}
++
++void DemandTracker::stop()
++{
++    m_active = false;
++    Q_EMIT enableRequested(false);
++    Q_EMIT activeChanged(false);
++}
++
++#include "moc_demandtracker.cpp"
+diff --git a/plugins/geolocation/demandtracker.h b/plugins/geolocation/demandtracker.h
+new file mode 100644
+index 000000000..4493d61ac
+--- /dev/null
++++ b/plugins/geolocation/demandtracker.h
+@@ -0,0 +1,43 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include <QObject>
++#include <QTimer>
++
++// Decides when the phone should send its location: as soon as anyone wants it
++// (TCP clients or a D-Bus start()), until stopDelay() ms after nobody does.
++class DemandTracker : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit DemandTracker(QObject *parent = nullptr);
++
++    void setStopDelay(int msec);
++    int stopDelay() const;
++
++    void setClientCount(int count);
++    void setDbusDemand(bool wanted);
++    bool isActive() const;
++
++    // Repeat enable(true) while active, e.g. after the phone reconnected.
++    void resend();
++
++Q_SIGNALS:
++    void enableRequested(bool enable);
++    void activeChanged(bool active);
++
++private:
++    void evaluate();
++    void stop();
++
++    int m_clients = 0;
++    bool m_dbus = false;
++    bool m_active = false;
++    QTimer m_stopTimer;
++};
+diff --git a/plugins/geolocation/geofix.h b/plugins/geolocation/geofix.h
+new file mode 100644
+index 000000000..4b6cc45c7
+--- /dev/null
++++ b/plugins/geolocation/geofix.h
+@@ -0,0 +1,20 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include <QDateTime>
++#include <QtNumeric>
++
++// Last known position, filled from RMC and GGA sentences. NaN = unknown.
++struct GeoFix {
++    double latitude = qQNaN();
++    double longitude = qQNaN();
++    double altitude = qQNaN(); // metres above mean sea level (GGA)
++    double speed = qQNaN(); // m/s
++    double bearing = qQNaN(); // degrees from true north
++    QDateTime timestamp; // UTC, from RMC only (GGA has no date)
++};
+diff --git a/plugins/geolocation/geolocationplugin.cpp b/plugins/geolocation/geolocationplugin.cpp
+new file mode 100644
+index 000000000..229ae3bd6
+--- /dev/null
++++ b/plugins/geolocation/geolocationplugin.cpp
+@@ -0,0 +1,193 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "geolocationplugin.h"
++
++#include "nmea.h"
++#include "plugin_geolocation_debug.h"
++
++#include <KLocalizedString>
++#include <QDBusConnection>
++#include <QDBusConnectionInterface>
++#include <QDBusMessage>
++#include <core/daemon.h>
++#include <core/device.h>
++
++GeolocationPlugin::GeolocationPlugin(QObject *parent, const QVariantList &args)
++    : KdeConnectPlugin(parent, args)
++{
++    connect(&m_server, &NmeaServer::clientCountChanged, &m_demand, &DemandTracker::setClientCount);
++    connect(&m_demand, &DemandTracker::enableRequested, this, &GeolocationPlugin::sendRequest);
++    connect(&m_demand, &DemandTracker::activeChanged, this, &GeolocationPlugin::activeChanged);
++    connect(config(), &KdeConnectPluginConfig::configChanged, this, &GeolocationPlugin::applyConfig);
++    m_callerWatcher.setConnection(QDBusConnection::sessionBus());
++    m_callerWatcher.setWatchMode(QDBusServiceWatcher::WatchForUnregistration);
++    connect(&m_callerWatcher, &QDBusServiceWatcher::serviceUnregistered, this, &GeolocationPlugin::removeCaller);
++    // Emitted by ~QObject of the device, after ~Device freed its links but
++    // before its children (this plugin) are deleted.
++    connect(device(), &QObject::destroyed, this, [this]() {
++        m_deviceGone = true;
++    });
++    applyConfig();
++}
++
++GeolocationPlugin::~GeolocationPlugin()
++{
++    // Unloaded while the phone is sending (plugin disabled): tell it to stop.
++    // Not when the device itself is being destroyed (its internals are gone),
++    // nor once it is unpaired (Device::sendPacket asserts isPaired()) or
++    // unreachable (nothing to send over).
++    if (m_demand.isActive() && !m_deviceGone && device()->isPaired() && device()->isReachable()) {
++        sendRequest(false);
++    }
++}
++
++void GeolocationPlugin::applyConfig()
++{
++    if (!config()->getBool(QStringLiteral("nmeaEnabled"), false)) {
++        m_server.close();
++        return;
++    }
++    const int configuredPort = config()->getInt(QStringLiteral("nmeaPort"), 10110);
++    if (configuredPort < 1 || configuredPort > 65535) {
++        m_server.close();
++        qCWarning(KDECONNECT_PLUGIN_GEOLOCATION) << "invalid port" << configuredPort;
++        Daemon::instance()->sendSimpleNotification(QStringLiteral("geolocationServerFailed"),
++                                                   device()->name(),
++                                                   i18n("Invalid port %1 for the location", QString::number(configuredPort)),
++                                                   QStringLiteral("mark-location"));
++        return;
++    }
++    const quint16 port = static_cast<quint16>(configuredPort);
++    if (m_server.isListening() && m_server.port() == port) {
++        return;
++    }
++    m_server.close();
++    if (!m_server.listen(port)) {
++        qCWarning(KDECONNECT_PLUGIN_GEOLOCATION) << "cannot listen on port" << port << m_server.errorString();
++        Daemon::instance()->sendSimpleNotification(QStringLiteral("geolocationServerFailed"),
++                                                   device()->name(),
++                                                   i18n("Cannot offer the location on port %1: %2", QString::number(port), m_server.errorString()),
++                                                   QStringLiteral("mark-location"));
++    }
++}
++
++void GeolocationPlugin::receivePacket(const NetworkPacket &np)
++{
++    if (np.type() != PACKET_TYPE_GEOLOCATION_NMEA) {
++        return;
++    }
++    const QString sentence = np.get<QString>(QStringLiteral("nmea")).trimmed();
++    if (!Nmea::hasValidChecksum(sentence)) {
++        qCDebug(KDECONNECT_PLUGIN_GEOLOCATION) << "dropping invalid NMEA sentence of" << sentence.size() << "characters";
++        return;
++    }
++    m_server.broadcast(sentence);
++    if (Nmea::update(m_fix, sentence)) {
++        Q_EMIT locationChanged();
++    }
++}
++
++void GeolocationPlugin::connected()
++{
++    m_demand.resend();
++}
++
++void GeolocationPlugin::sendRequest(bool enable)
++{
++    NetworkPacket np(PACKET_TYPE_GEOLOCATION_REQUEST, {{QStringLiteral("enable"), enable}});
++    sendPacket(np);
++}
++
++double GeolocationPlugin::latitude() const
++{
++    return m_fix.latitude;
++}
++
++double GeolocationPlugin::longitude() const
++{
++    return m_fix.longitude;
++}
++
++double GeolocationPlugin::altitude() const
++{
++    return m_fix.altitude;
++}
++
++double GeolocationPlugin::speed() const
++{
++    return m_fix.speed;
++}
++
++double GeolocationPlugin::bearing() const
++{
++    return m_fix.bearing;
++}
++
++qint64 GeolocationPlugin::timestamp() const
++{
++    return m_fix.timestamp.isValid() ? m_fix.timestamp.toMSecsSinceEpoch() : 0;
++}
++
++bool GeolocationPlugin::isActive() const
++{
++    return m_demand.isActive();
++}
++
++QString GeolocationPlugin::caller() const
++{
++    return calledFromDBus() ? message().service() : QString();
++}
++
++void GeolocationPlugin::start()
++{
++    const QString name = caller();
++    if (!name.isEmpty()) {
++        m_callerWatcher.addWatchedService(name);
++        // A caller that did not wait for the reply may already be gone, and
++        // then we never see it leave. Asked after the watch was installed.
++        if (!connection().interface()->isServiceRegistered(name)) {
++            removeCaller(name);
++            return;
++        }
++    }
++    m_callers.insert(name);
++    m_demand.setDbusDemand(true);
++}
++
++void GeolocationPlugin::stop()
++{
++    removeCaller(caller());
++}
++
++void GeolocationPlugin::removeCaller(const QString &name)
++{
++    m_callerWatcher.removeWatchedService(name);
++    m_callers.remove(name);
++    m_demand.setDbusDemand(!m_callers.isEmpty());
++}
++
++bool GeolocationPlugin::isNmeaServerListening() const
++{
++    return m_server.isListening();
++}
++
++quint16 GeolocationPlugin::nmeaServerPort() const
++{
++    return m_server.port();
++}
++
++void GeolocationPlugin::setStopDelayForTesting(int msec)
++{
++    m_demand.setStopDelay(msec);
++}
++
++QString GeolocationPlugin::dbusPath() const
++{
++    return QLatin1String("/modules/kdeconnect/devices/%1/geolocation").arg(device()->id());
++}
++
++#include "moc_geolocationplugin.cpp"
+diff --git a/plugins/geolocation/geolocationplugin.h b/plugins/geolocation/geolocationplugin.h
+new file mode 100644
+index 000000000..72fee31c1
+--- /dev/null
++++ b/plugins/geolocation/geolocationplugin.h
+@@ -0,0 +1,81 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include "demandtracker.h"
++#include "geofix.h"
++#include "nmeaserver.h"
++
++#include <core/kdeconnectplugin.h>
++
++#include <QDBusContext>
++#include <QDBusServiceWatcher>
++#include <QSet>
++
++#define PACKET_TYPE_GEOLOCATION_NMEA QStringLiteral("kdeconnect.geolocation.nmea")
++#define PACKET_TYPE_GEOLOCATION_REQUEST QStringLiteral("kdeconnect.geolocation.request")
++
++class GeolocationPlugin : public KdeConnectPlugin, protected QDBusContext
++{
++    Q_OBJECT
++    Q_CLASSINFO("D-Bus Interface", "org.kde.kdeconnect.device.geolocation")
++    Q_PROPERTY(double latitude READ latitude NOTIFY locationChanged)
++    Q_PROPERTY(double longitude READ longitude NOTIFY locationChanged)
++    Q_PROPERTY(double altitude READ altitude NOTIFY locationChanged)
++    Q_PROPERTY(double speed READ speed NOTIFY locationChanged)
++    Q_PROPERTY(double bearing READ bearing NOTIFY locationChanged)
++    Q_PROPERTY(qint64 timestamp READ timestamp NOTIFY locationChanged)
++    Q_PROPERTY(bool isActive READ isActive NOTIFY activeChanged)
++
++public:
++    GeolocationPlugin(QObject *parent, const QVariantList &args);
++    ~GeolocationPlugin() override;
++
++    void receivePacket(const NetworkPacket &np) override;
++    void connected() override;
++    QString dbusPath() const override;
++
++    double latitude() const;
++    double longitude() const;
++    double altitude() const;
++    double speed() const;
++    double bearing() const;
++    qint64 timestamp() const; // ms since epoch (UTC), 0 = unknown
++    bool isActive() const;
++
++    // Each D-Bus caller keeps the location running until it calls stop() or
++    // leaves the bus. Calls from within the process count as one caller.
++    Q_SCRIPTABLE void start();
++    Q_SCRIPTABLE void stop();
++
++    bool isNmeaServerListening() const;
++    quint16 nmeaServerPort() const;
++    void setStopDelayForTesting(int msec);
++
++Q_SIGNALS:
++    Q_SCRIPTABLE void locationChanged();
++    Q_SCRIPTABLE void activeChanged(bool active);
++
++private Q_SLOTS:
++    void applyConfig();
++
++private:
++    void sendRequest(bool enable);
++    QString caller() const;
++    void removeCaller(const QString &name);
++
++    QSet<QString> m_callers;
++    QDBusServiceWatcher m_callerWatcher;
++
++    // Destroyed in reverse order: m_demand goes first, which removes its
++    // connections, so the clientCountChanged emitted while ~NmeaServer drops
++    // the clients reaches no one.
++    NmeaServer m_server;
++    DemandTracker m_demand;
++    GeoFix m_fix;
++    bool m_deviceGone = false;
++};
+diff --git a/plugins/geolocation/geolocationpluginfactory.cpp b/plugins/geolocation/geolocationpluginfactory.cpp
+new file mode 100644
+index 000000000..d4e0462c3
+--- /dev/null
++++ b/plugins/geolocation/geolocationpluginfactory.cpp
+@@ -0,0 +1,13 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "geolocationplugin.h"
++
++#include <KPluginFactory>
++
++K_PLUGIN_CLASS_WITH_JSON(GeolocationPlugin, "kdeconnect_geolocation.json")
++
++#include "geolocationpluginfactory.moc"
+diff --git a/plugins/geolocation/kdeconnect_geolocation.json b/plugins/geolocation/kdeconnect_geolocation.json
+new file mode 100644
+index 000000000..14b275bbb
+--- /dev/null
++++ b/plugins/geolocation/kdeconnect_geolocation.json
+@@ -0,0 +1,22 @@
++{
++    "$schema": "../kdeconnect.schema.json",
++    "KPlugin": {
++        "Authors": [
++            {
++                "Email": "gert@pellin.be",
++                "Name": "Gert Pellin"
++            }
++        ],
++        "Description": "Receive the location of the other device and offer it to applications as NMEA",
++        "EnabledByDefault": true,
++        "Icon": "mark-location",
++        "License": "GPL",
++        "Name": "Location"
++    },
++    "X-KdeConnect-OutgoingPacketType": [
++        "kdeconnect.geolocation.request"
++    ],
++    "X-KdeConnect-SupportedPacketType": [
++        "kdeconnect.geolocation.nmea"
++    ]
++}
+diff --git a/plugins/geolocation/kdeconnect_geolocation_config.qml b/plugins/geolocation/kdeconnect_geolocation_config.qml
+new file mode 100644
+index 000000000..8dd1eb5a4
+--- /dev/null
++++ b/plugins/geolocation/kdeconnect_geolocation_config.qml
+@@ -0,0 +1,80 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++import QtQuick 2.15
++import QtQuick.Controls 2.15 as QQC2
++import QtQuick.Layouts 1.15
++import org.kde.kirigami 2.20 as Kirigami
++import org.kde.kdeconnect 1.0
++
++Kirigami.ScrollablePage {
++    id: root
++
++    property string device
++
++    Component.onCompleted: {
++        nmeaEnabled.checked = config.getBool("nmeaEnabled", false)
++        nmeaPort.value = config.getInt("nmeaPort", 10110)
++    }
++
++    Kirigami.FormLayout {
++        KdeConnectPluginConfig {
++            id: config
++            deviceId: device
++            pluginName: "kdeconnect_geolocation"
++        }
++
++        QQC2.CheckBox {
++            id: nmeaEnabled
++            text: i18nd("kdeconnect-plugins", "Offer this device's location to applications (NMEA over TCP)")
++            focus: true
++            onClicked: config.set("nmeaEnabled", checked)
++        }
++
++        QQC2.SpinBox {
++            id: nmeaPort
++            Kirigami.FormData.label: i18nd("kdeconnect-plugins", "Port on localhost:")
++            from: 1
++            to: 65535
++            editable: true
++            enabled: nmeaEnabled.checked
++            // A port number, not a quantity: no digit grouping ("10110", not "10,110").
++            textFromValue: function(value, locale) { return value.toString() }
++            valueFromText: function(text, locale) {
++                const port = parseInt(text, 10)
++                return isNaN(port) ? value : port
++            }
++            validator: IntValidator {
++                bottom: nmeaPort.from
++                top: nmeaPort.to
++            }
++            // Every change makes the daemon listen again: wait until the user
++            // stops stepping through the numbers, or leaves the field.
++            onValueModified: commitPort.restart()
++            onActiveFocusChanged: if (!activeFocus && commitPort.running) {
++                commitPort.stop()
++                config.set("nmeaPort", value)
++            }
++            // The page may close before the timer fires.
++            Component.onDestruction: if (commitPort.running) {
++                commitPort.stop()
++                config.set("nmeaPort", value)
++            }
++
++            Timer {
++                id: commitPort
++                interval: 1000
++                onTriggered: config.set("nmeaPort", nmeaPort.value)
++            }
++        }
++
++        QQC2.Label {
++            Layout.fillWidth: true
++            wrapMode: Text.WordWrap
++            text: i18nd("kdeconnect-plugins", "Every program and every user on this computer can read the location from this port. The device only sends its location while a program is connected. Each device needs its own port.")
++        }
++    }
++}
+diff --git a/plugins/geolocation/nmea.cpp b/plugins/geolocation/nmea.cpp
+new file mode 100644
+index 000000000..692c2f853
+--- /dev/null
++++ b/plugins/geolocation/nmea.cpp
+@@ -0,0 +1,127 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "nmea.h"
++
++#include <QStringList>
++#include <QTimeZone>
++
++#include <algorithm>
++#include <cmath>
++
++bool Nmea::hasValidChecksum(const QString &sentence)
++{
++    const qsizetype star = sentence.size() - 3;
++    if (star < 1 || sentence.size() > MaxSentenceLength || !sentence.startsWith(QLatin1Char('$')) || sentence.at(star) != QLatin1Char('*')) {
++        return false;
++    }
++    // Checked explicitly: toUInt() would also take a sign or blanks.
++    const QString hexDigits = QStringLiteral("0123456789ABCDEFabcdef");
++    if (!hexDigits.contains(sentence.at(star + 1)) || !hexDigits.contains(sentence.at(star + 2))) {
++        return false;
++    }
++    uint sum = 0;
++    for (qsizetype i = 1; i < star; ++i) {
++        const char16_t c = sentence.at(i).unicode();
++        if (c < 0x20 || c > 0x7E) { // printable ASCII only: no line breaks, nothing toLatin1() would mangle
++            return false;
++        }
++        sum ^= c;
++    }
++    return sum == QStringView(sentence).sliced(star + 1).toUInt(nullptr, 16);
++}
++
++namespace
++{
++bool isDigits(QStringView value)
++{
++    return std::all_of(value.begin(), value.end(), [](QChar c) {
++        return c >= u'0' && c <= u'9';
++    });
++}
++
++// "ddmm.mmmm" / "dddmm.mmmm" plus hemisphere -> signed decimal degrees.
++bool parseCoordinate(const QString &value, const QString &hemisphere, QLatin1StringView positive, QLatin1StringView negative, double limit, double &result)
++{
++    // Digits and at most one '.': no sign, exponent, nan or inf.
++    const qsizetype dot = value.indexOf(QLatin1Char('.'));
++    const QStringView whole = QStringView(value).first(dot < 0 ? value.size() : dot);
++    if (whole.isEmpty() || !isDigits(whole) || (dot >= 0 && !isDigits(QStringView(value).sliced(dot + 1)))) {
++        return false;
++    }
++    const double raw = value.toDouble();
++    const double degrees = std::floor(raw / 100.0);
++    const double minutes = raw - degrees * 100.0;
++    double decimal = degrees + minutes / 60.0;
++    if (minutes >= 60.0 || decimal > limit) {
++        return false;
++    }
++    if (hemisphere == negative) {
++        decimal = -decimal;
++    } else if (hemisphere != positive) {
++        return false;
++    }
++    result = decimal;
++    return true;
++}
++
++double optionalNumber(const QString &value, double factor = 1.0)
++{
++    bool ok = false;
++    const double number = value.toDouble(&ok);
++    return ok && std::isfinite(number) ? number * factor : qQNaN();
++}
++
++// value if min <= value < end, else NaN (also for NaN)
++double inRange(double value, double min, double end)
++{
++    return value >= min && value < end ? value : qQNaN();
++}
++
++bool parsePosition(const QStringList &f, int latIndex, double &lat, double &lon)
++{
++    return parseCoordinate(f.at(latIndex), f.at(latIndex + 1), QLatin1StringView("N"), QLatin1StringView("S"), 90.0, lat)
++        && parseCoordinate(f.at(latIndex + 2), f.at(latIndex + 3), QLatin1StringView("E"), QLatin1StringView("W"), 180.0, lon);
++}
++
++// "hhmmss" with an optional fraction of a second; digits past milliseconds are dropped.
++QTime parseTime(QStringView value)
++{
++    if (value.size() < 6 || !isDigits(value.first(6)) || (value.size() > 6 && (value.at(6) != u'.' || !isDigits(value.sliced(7))))) {
++        return QTime();
++    }
++    const int msec = value.mid(7, 3).toString().leftJustified(3, QLatin1Char('0')).toInt();
++    return QTime(value.first(2).toInt(), value.sliced(2, 2).toInt(), value.sliced(4, 2).toInt(), msec);
++}
++
++constexpr double knotsToMetresPerSecond = 1852.0 / 3600.0;
++}
++
++bool Nmea::update(GeoFix &fix, const QString &sentence)
++{
++    const QStringList f = sentence.left(sentence.indexOf(QLatin1Char('*'))).split(QLatin1Char(','));
++    const QStringView type = QStringView(f.at(0)).sliced(qMin<qsizetype>(3, f.at(0).size()));
++    double lat = 0;
++    double lon = 0;
++
++    if (type == u"RMC" && f.size() >= 10 && f.at(2) == QLatin1String("A") && parsePosition(f, 3, lat, lon)) {
++        fix.latitude = lat;
++        fix.longitude = lon;
++        fix.speed = inRange(optionalNumber(f.at(7), knotsToMetresPerSecond), 0.0, qInf());
++        fix.bearing = inRange(optionalNumber(f.at(8)), 0.0, 360.0);
++        const QDate date = QDate::fromString(f.at(9), QStringLiteral("ddMMyy")).addYears(100);
++        const QTime time = parseTime(f.at(1));
++        fix.timestamp = date.isValid() && time.isValid() ? QDateTime(date, time, QTimeZone::UTC) : QDateTime();
++        return true;
++    }
++    if (type == u"GGA" && f.size() >= 10 && !f.at(6).isEmpty() && f.at(6) != QLatin1String("0") && parsePosition(f, 2, lat, lon)) {
++        fix.latitude = lat;
++        fix.longitude = lon;
++        fix.altitude = optionalNumber(f.at(9));
++        return true;
++    }
++    return false;
++}
+diff --git a/plugins/geolocation/nmea.h b/plugins/geolocation/nmea.h
+new file mode 100644
+index 000000000..7333da39a
+--- /dev/null
++++ b/plugins/geolocation/nmea.h
+@@ -0,0 +1,27 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include "geofix.h"
++
++#include <QString>
++
++namespace Nmea
++{
++// NMEA allows 82 characters including CR LF; leave some slack.
++constexpr qsizetype MaxSentenceLength = 128;
++
++// "$...*hh" of at most MaxSentenceLength characters, only printable ASCII
++// between '$' and '*', and the XOR of those characters equal to the hex hh.
++bool hasValidChecksum(const QString &sentence);
++
++// Updates fix from a valid RMC (with status A) or GGA (with a fix) sentence.
++// RMC sets position, speed, course and timestamp; GGA sets position and
++// altitude but leaves the timestamp alone. Returns true if fix changed;
++// other sentence types leave fix untouched.
++bool update(GeoFix &fix, const QString &sentence);
++}
+diff --git a/plugins/geolocation/nmeaserver.cpp b/plugins/geolocation/nmeaserver.cpp
+new file mode 100644
+index 000000000..b47aeb8d2
+--- /dev/null
++++ b/plugins/geolocation/nmeaserver.cpp
+@@ -0,0 +1,108 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "nmeaserver.h"
++
++#include <QTcpSocket>
++
++NmeaServer::NmeaServer(QObject *parent)
++    : QObject(parent)
++{
++    connect(&m_server, &QTcpServer::newConnection, this, &NmeaServer::acceptClients);
++}
++
++NmeaServer::~NmeaServer()
++{
++    // Drop the clients while our members are still alive: their disconnected
++    // handlers touch m_clients.
++    close();
++}
++
++bool NmeaServer::listen(quint16 port)
++{
++    return m_server.listen(QHostAddress::LocalHost, port);
++}
++
++void NmeaServer::close()
++{
++    m_server.close();
++    const QList<QTcpSocket *> clients = m_clients;
++    for (QTcpSocket *client : clients) {
++        client->abort();
++        dropClient(client);
++    }
++}
++
++bool NmeaServer::isListening() const
++{
++    return m_server.isListening();
++}
++
++quint16 NmeaServer::port() const
++{
++    return m_server.serverPort();
++}
++
++QHostAddress NmeaServer::address() const
++{
++    return m_server.serverAddress();
++}
++
++QString NmeaServer::errorString() const
++{
++    return m_server.errorString();
++}
++
++int NmeaServer::clientCount() const
++{
++    return m_clients.size();
++}
++
++void NmeaServer::broadcast(const QString &sentence)
++{
++    const QByteArray line = sentence.toLatin1() + "\r\n";
++    const QList<QTcpSocket *> clients = m_clients;
++    for (QTcpSocket *client : clients) {
++        client->write(line);
++        // A client that does not read would make us buffer without limit.
++        if (client->bytesToWrite() > MaxPendingBytes) {
++            client->abort();
++            dropClient(client);
++        }
++    }
++}
++
++void NmeaServer::acceptClients()
++{
++    while (QTcpSocket *client = m_server.nextPendingConnection()) {
++        if (m_clients.size() >= MaxClients) {
++            client->abort();
++            client->deleteLater();
++            continue;
++        }
++        client->setParent(this);
++        m_clients.append(client);
++        // Clients have nothing to tell us: throw their input away instead of
++        // letting it pile up in the read buffer.
++        connect(client, &QIODevice::readyRead, client, [client]() {
++            client->skip(client->bytesAvailable());
++        });
++        connect(client, &QTcpSocket::disconnected, this, [this, client]() {
++            dropClient(client);
++        });
++        Q_EMIT clientCountChanged(m_clients.size());
++    }
++}
++
++void NmeaServer::dropClient(QTcpSocket *client)
++{
++    if (m_clients.removeOne(client)) {
++        client->deleteLater();
++        Q_EMIT clientCountChanged(m_clients.size());
++    }
++}
++
++#include "moc_nmeaserver.cpp"
+diff --git a/plugins/geolocation/nmeaserver.h b/plugins/geolocation/nmeaserver.h
+new file mode 100644
+index 000000000..c1bf18445
+--- /dev/null
++++ b/plugins/geolocation/nmeaserver.h
+@@ -0,0 +1,47 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#pragma once
++
++#include <QList>
++#include <QTcpServer>
++
++class QTcpSocket;
++
++// Serves NMEA 0183 sentences to up to MaxClients TCP clients on 127.0.0.1.
++class NmeaServer : public QObject
++{
++    Q_OBJECT
++
++public:
++    // Further connections are closed right away.
++    static constexpr int MaxClients = 16;
++    // A client with more unsent data than this is dropped.
++    static constexpr qint64 MaxPendingBytes = 64 * 1024;
++
++    explicit NmeaServer(QObject *parent = nullptr);
++    ~NmeaServer() override;
++
++    bool listen(quint16 port); // port 0 = any free port (tests)
++    void close();
++    bool isListening() const;
++    quint16 port() const;
++    QHostAddress address() const;
++    QString errorString() const;
++    int clientCount() const;
++
++    void broadcast(const QString &sentence); // appends "\r\n"
++
++Q_SIGNALS:
++    void clientCountChanged(int count);
++
++private:
++    void acceptClients();
++    void dropClient(QTcpSocket *client);
++
++    QTcpServer m_server;
++    QList<QTcpSocket *> m_clients;
++};
+diff --git a/plugins/kdeconnect.notifyrc b/plugins/kdeconnect.notifyrc
+index 6ee7fbcde..67ba44d15 100644
+--- a/plugins/kdeconnect.notifyrc
++++ b/plugins/kdeconnect.notifyrc
+@@ -1162,3 +1162,8 @@ Name[uk]=Помилка
+ Name[zh_CN]=错误
+ Name[zh_TW]=錯誤
+ Action=Popup
++
++[Event/geolocationServerFailed]
++Name=Location sharing failed
++Comment=The location of a device could not be offered to applications
++Action=Popup
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 3e3cf8fd1..d566b41fe 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -25,3 +25,4 @@ ecm_add_test(smshelpertest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
+ if (WIN32 OR APPLE)
+     ecm_add_test(mdnstest.cpp LINK_LIBRARIES ${kdeconnect_libraries})
+ endif()
++add_subdirectory(geolocation)
+diff --git a/tests/geolocation/CMakeLists.txt b/tests/geolocation/CMakeLists.txt
+new file mode 100644
+index 000000000..9ce79ae28
+--- /dev/null
++++ b/tests/geolocation/CMakeLists.txt
+@@ -0,0 +1,22 @@
++set(geolocation_dir ${CMAKE_SOURCE_DIR}/plugins/geolocation)
++
++function(geolocation_test name)
++    ecm_add_test(${name}.cpp ${ARGN} TEST_NAME ${name} LINK_LIBRARIES ${kdeconnect_libraries} Qt::Network)
++    target_include_directories(${name} PRIVATE ${geolocation_dir})
++    ecm_qt_declare_logging_category(${name}
++        HEADER plugin_geolocation_debug.h
++        IDENTIFIER KDECONNECT_PLUGIN_GEOLOCATION
++        CATEGORY_NAME kdeconnect.plugin.geolocation)
++endfunction()
++
++geolocation_test(nmeatest ${geolocation_dir}/nmea.cpp)
++geolocation_test(nmeaservertest ${geolocation_dir}/nmeaserver.cpp)
++geolocation_test(demandtrackertest ${geolocation_dir}/demandtracker.cpp)
++
++geolocation_test(geolocationplugintest
++    ${geolocation_dir}/geolocationplugin.cpp
++    ${geolocation_dir}/nmea.cpp
++    ${geolocation_dir}/nmeaserver.cpp
++    ${geolocation_dir}/demandtracker.cpp
++    ${CMAKE_SOURCE_DIR}/tests/testdevice.cpp)
++target_include_directories(geolocationplugintest PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+diff --git a/tests/geolocation/demandtrackertest.cpp b/tests/geolocation/demandtrackertest.cpp
+new file mode 100644
+index 000000000..8bbb13eeb
+--- /dev/null
++++ b/tests/geolocation/demandtrackertest.cpp
+@@ -0,0 +1,134 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "demandtracker.h"
++
++#include <QSignalSpy>
++#include <QTest>
++
++class DemandTrackerTest : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void defaultStopDelayIs30Seconds()
++    {
++        DemandTracker tracker;
++        QCOMPARE(tracker.stopDelay(), 30000);
++    }
++
++    void firstClientStartsLastClientStopsAfterDelay()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(50);
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++
++        tracker.setClientCount(1);
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(spy.last().at(0).toBool(), true);
++        QVERIFY(tracker.isActive());
++
++        tracker.setClientCount(2); // still active: no new request
++        QCOMPARE(spy.count(), 1);
++
++        tracker.setClientCount(0);
++        QCOMPARE(spy.count(), 1); // not yet
++        QVERIFY(tracker.isActive());
++        QTRY_COMPARE(spy.count(), 2);
++        QCOMPARE(spy.last().at(0).toBool(), false);
++        QVERIFY(!tracker.isActive());
++    }
++
++    void comingBackWithinDelayCancelsStop()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(50);
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++
++        tracker.setClientCount(1);
++        tracker.setClientCount(0);
++        tracker.setClientCount(1);
++        QTest::qWait(100);
++        QCOMPARE(spy.count(), 1); // only the first enable
++        QVERIFY(tracker.isActive());
++    }
++
++    void dbusDemandCountsLikeAClient()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(0);
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++
++        tracker.setDbusDemand(true);
++        QCOMPARE(spy.count(), 1);
++        tracker.setClientCount(1);
++        tracker.setClientCount(0); // D-Bus still wants it
++        QTest::qWait(20);
++        QCOMPARE(spy.count(), 1);
++
++        tracker.setDbusDemand(false);
++        QTRY_COMPARE(spy.count(), 2);
++        QCOMPARE(spy.last().at(0).toBool(), false);
++    }
++
++    void noDemandWhileInactiveDoesNothing()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(50);
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++        tracker.setClientCount(0);
++        QTest::qWait(100);
++        QCOMPARE(spy.count(), 0);
++        QVERIFY(!tracker.isActive());
++    }
++
++    void repeatedZeroKeepsOnePendingStop()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(50);
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++        tracker.setClientCount(1);
++        tracker.setClientCount(0);
++        tracker.setClientCount(0); // timer already running
++        QTRY_COMPARE(spy.count(), 2);
++        QTest::qWait(100);
++        QCOMPARE(spy.count(), 2);
++    }
++
++    void activeChangedFollowsTheState()
++    {
++        DemandTracker tracker;
++        tracker.setStopDelay(0);
++        QSignalSpy spy(&tracker, SIGNAL(activeChanged(bool)));
++        QVERIFY(spy.isValid());
++
++        tracker.setClientCount(1);
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(spy.last().at(0).toBool(), true);
++        tracker.setDbusDemand(true); // still active: no change
++        tracker.setClientCount(0);
++        tracker.setDbusDemand(false);
++        QTRY_COMPARE(spy.count(), 2);
++        QCOMPARE(spy.last().at(0).toBool(), false);
++    }
++
++    void resendRepeatsEnableOnlyWhenActive()
++    {
++        DemandTracker tracker;
++        QSignalSpy spy(&tracker, &DemandTracker::enableRequested);
++
++        tracker.resend();
++        QCOMPARE(spy.count(), 0);
++
++        tracker.setClientCount(1);
++        tracker.resend();
++        QCOMPARE(spy.count(), 2);
++        QCOMPARE(spy.last().at(0).toBool(), true);
++    }
++};
++
++QTEST_GUILESS_MAIN(DemandTrackerTest)
++#include "demandtrackertest.moc"
+diff --git a/tests/geolocation/geolocationplugintest.cpp b/tests/geolocation/geolocationplugintest.cpp
+new file mode 100644
+index 000000000..4e12a06ec
+--- /dev/null
++++ b/tests/geolocation/geolocationplugintest.cpp
+@@ -0,0 +1,453 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "geolocationplugin.h"
++#include "testdaemon.h"
++#include "testdevice.h"
++
++#include <core/kdeconnectconfig.h>
++
++#include <QDBusConnection>
++#include <QDBusConnectionInterface>
++#include <QDBusMessage>
++#include <QDBusPendingCall>
++#include <QDeadlineTimer>
++#include <QDir>
++#include <QLoggingCategory>
++#include <QMetaProperty>
++#include <QPointer>
++#include <QRegularExpression>
++#include <QSignalSpy>
++#include <QStandardPaths>
++#include <QTcpServer>
++#include <QTcpSocket>
++#include <QTest>
++#include <QThread>
++
++static const QString RMC = QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,10.0,271.5,061026,,,A*7B");
++static const QString GGA = QStringLiteral("$GNGGA,123519.00,5046.8360,N,00527.8520,E,1,08,0.9,108.4,M,46.9,M,,*7D");
++
++// TestDevice is always reachable; this one can drop off the network.
++class GeoTestDevice : public TestDevice
++{
++public:
++    using TestDevice::TestDevice;
++    bool isReachable() const override
++    {
++        return reachable;
++    }
++    bool reachable = true;
++};
++
++// Calls the plugin over the (test) session bus from its own bus connection,
++// so the plugin sees a separate caller. The connection is closed on destruction.
++class DbusCaller
++{
++public:
++    DbusCaller(GeolocationPlugin *plugin, const QString &name)
++        : m_name(name)
++        , m_connection(QDBusConnection::connectToBus(QDBusConnection::SessionBus, name))
++    {
++        QDBusConnection::sessionBus().registerObject(path(), plugin, QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableInvokables);
++    }
++    ~DbusCaller()
++    {
++        leave();
++        QDBusConnection::sessionBus().unregisterObject(path());
++    }
++    // Closes the connection and returns once the bus has forgotten its name,
++    // without running this thread's event loop (so the plugin sees nothing yet).
++    void leave()
++    {
++        const QString uniqueName = m_connection.baseService();
++        m_connection = QDBusConnection(QString()); // the bus connection closes with its last reference
++        QDBusConnection::disconnectFromBus(m_name);
++        QDBusConnection witness = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("witness"));
++        const QDeadlineTimer deadline(5000);
++        while (!uniqueName.isEmpty() && witness.interface()->isServiceRegistered(uniqueName) && !deadline.hasExpired()) {
++            QThread::msleep(5);
++        }
++        QDBusConnection::disconnectFromBus(QStringLiteral("witness"));
++    }
++    bool call(const QString &method)
++    {
++        QDBusPendingCall pending = m_connection.asyncCall(methodCall(method));
++        // the plugin answers from this thread's event loop
++        const bool finished = QTest::qWaitFor([&pending]() {
++            return pending.isFinished();
++        });
++        return finished && !pending.isError();
++    }
++
++    // Like dbus-send without --print-reply: does not wait for the plugin.
++    // Returns once the bus has routed the call (a later round trip on the
++    // same connection is answered after it), without running our event loop.
++    void send(const QString &method)
++    {
++        QVERIFY(m_connection.send(methodCall(method)));
++        QVERIFY(m_connection.interface()->isServiceRegistered(m_connection.baseService()));
++    }
++
++private:
++    static QString path()
++    {
++        return QStringLiteral("/geolocationtest");
++    }
++    static QDBusMessage methodCall(const QString &method)
++    {
++        return QDBusMessage::createMethodCall(QDBusConnection::sessionBus().baseService(),
++                                              path(),
++                                              QStringLiteral("org.kde.kdeconnect.device.geolocation"),
++                                              method);
++    }
++    QString m_name;
++    QDBusConnection m_connection;
++};
++
++class GeolocationPluginTest : public QObject
++{
++    Q_OBJECT
++
++private:
++    TestDaemon *m_daemon = nullptr;
++    GeoTestDevice *m_device = nullptr;
++    GeolocationPlugin *m_plugin = nullptr;
++    quint16 m_port = 0;
++
++    static NetworkPacket nmeaPacket(const QString &sentence)
++    {
++        return NetworkPacket(PACKET_TYPE_GEOLOCATION_NMEA, {{QStringLiteral("nmea"), sentence}});
++    }
++
++    quint16 freePort()
++    {
++        QTcpServer probe;
++        probe.listen(QHostAddress::LocalHost, 0);
++        return probe.serverPort();
++    }
++
++    void enableOutput(bool enabled)
++    {
++        m_plugin->config()->set(QStringLiteral("nmeaPort"), m_port);
++        m_plugin->config()->set(QStringLiteral("nmeaEnabled"), enabled);
++        QMetaObject::invokeMethod(m_plugin, "applyConfig");
++    }
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        QStandardPaths::setTestModeEnabled(true);
++        // settings of earlier runs persist in ~/.qttest
++        QDir config = KdeConnectConfig::instance().pluginConfigDir(QStringLiteral("geolocationtestdevice"), QStringLiteral("kdeconnect_geolocation"));
++        QVERIFY(config.removeRecursively());
++        m_daemon = new TestDaemon(this);
++    }
++
++    void init()
++    {
++        m_device = new GeoTestDevice(this, QStringLiteral("geolocationtestdevice"));
++        const QVariantList args{QVariant::fromValue<Device *>(m_device),
++                                QStringLiteral("kdeconnect_geolocation"),
++                                QStringList{PACKET_TYPE_GEOLOCATION_REQUEST},
++                                QStringLiteral("mark-location")};
++        m_plugin = new GeolocationPlugin(m_device, args);
++        m_port = freePort();
++    }
++
++    void cleanup()
++    {
++        if (m_plugin) {
++            m_plugin->config()->set(QStringLiteral("nmeaEnabled"), false);
++            delete m_plugin;
++        }
++        delete m_device;
++    }
++
++    void outputIsOffByDefault()
++    {
++        QVERIFY(!m_plugin->isNmeaServerListening());
++    }
++
++    void dbusPathContainsDeviceId()
++    {
++        QCOMPARE(m_plugin->dbusPath(), QStringLiteral("/modules/kdeconnect/devices/geolocationtestdevice/geolocation"));
++    }
++
++    void clientTriggersEnableAndReceivesSentences()
++    {
++        enableOutput(true);
++        QVERIFY(m_plugin->isNmeaServerListening());
++
++        QTcpSocket client;
++        client.connectToHost(QHostAddress::LocalHost, m_port);
++        QTRY_VERIFY(m_device->getLastPacket());
++        QCOMPARE(m_device->getLastPacket()->type(), PACKET_TYPE_GEOLOCATION_REQUEST);
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), true);
++        QVERIFY(m_plugin->isActive());
++
++        QSignalSpy changed(m_plugin, &GeolocationPlugin::locationChanged);
++        m_plugin->receivePacket(nmeaPacket(RMC + QStringLiteral("\r\n")));
++        m_plugin->receivePacket(nmeaPacket(GGA));
++        QTRY_VERIFY(client.canReadLine());
++        QCOMPARE(client.readLine(), (RMC + QStringLiteral("\r\n")).toLatin1());
++        QCOMPARE(changed.count(), 2);
++        QCOMPARE(m_plugin->latitude(), 50.0 + 46.836 / 60.0);
++        QCOMPARE(m_plugin->longitude(), 5.0 + 27.852 / 60.0);
++        QCOMPARE(m_plugin->altitude(), 108.4);
++        QCOMPARE(m_plugin->speed(), 10.0 * 1852.0 / 3600.0);
++        QCOMPARE(m_plugin->bearing(), 271.5);
++        QCOMPARE(m_plugin->timestamp(), QDateTime(QDate(2026, 10, 6), QTime(12, 35, 19), QTimeZone::UTC).toMSecsSinceEpoch());
++    }
++
++    void invalidAndForeignPacketsAreIgnored()
++    {
++        enableOutput(true);
++        QTcpSocket client;
++        client.connectToHost(QHostAddress::LocalHost, m_port);
++        QTRY_VERIFY(m_plugin->isActive());
++
++        QSignalSpy changed(m_plugin, &GeolocationPlugin::locationChanged);
++        // Both logging branches (category on and off) must run for full branch coverage.
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.plugin.geolocation.debug=true"));
++        // logged without its content (it may hold a location)
++        QTest::ignoreMessage(QtDebugMsg, "dropping invalid NMEA sentence of 16 characters");
++        m_plugin->receivePacket(nmeaPacket(QStringLiteral("$GNRMC,broken*00")));
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.plugin.geolocation.debug=false"));
++        m_plugin->receivePacket(nmeaPacket(QStringLiteral("$GNRMC,broken*01"))); // not logged
++        m_plugin->receivePacket(NetworkPacket(QStringLiteral("kdeconnect.ping")));
++        m_plugin->receivePacket(nmeaPacket(QStringLiteral("$GPGSV,1,1,01,01,40,083,46*44")));
++        QTRY_VERIFY(client.canReadLine()); // the valid GSV is relayed
++        QCOMPARE(client.readLine(), QByteArray("$GPGSV,1,1,01,01,40,083,46*44\r\n"));
++        QVERIFY(!client.canReadLine());
++        QCOMPARE(changed.count(), 0);
++        QVERIFY(qIsNaN(m_plugin->latitude()));
++        QCOMPARE(m_plugin->timestamp(), qint64(0));
++    }
++
++    void dbusStartStop()
++    {
++        m_plugin->setStopDelayForTesting(0);
++        m_plugin->start();
++        QVERIFY(m_device->getLastPacket());
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), true);
++        m_plugin->stop();
++        QTRY_COMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), false);
++        QVERIFY(!m_plugin->isActive());
++    }
++
++    void isActiveNotifiesChanges()
++    {
++        const QMetaObject *meta = m_plugin->metaObject();
++        const QMetaProperty property = meta->property(meta->indexOfProperty("isActive"));
++        QVERIFY(property.hasNotifySignal());
++        QCOMPARE(property.notifySignal().name(), QByteArray("activeChanged"));
++
++        QSignalSpy spy(m_plugin, SIGNAL(activeChanged(bool)));
++        QVERIFY(spy.isValid());
++        m_plugin->setStopDelayForTesting(0);
++        m_plugin->start();
++        QCOMPARE(spy.count(), 1);
++        QCOMPARE(spy.last().at(0).toBool(), true);
++        m_plugin->stop();
++        QTRY_COMPARE(spy.count(), 2);
++        QCOMPARE(spy.last().at(0).toBool(), false);
++    }
++
++    void dbusCallersAreCountedSeparately()
++    {
++        m_plugin->setStopDelayForTesting(0);
++        DbusCaller a(m_plugin, QStringLiteral("callerA"));
++        DbusCaller b(m_plugin, QStringLiteral("callerB"));
++
++        QVERIFY(a.call(QStringLiteral("start")));
++        QVERIFY(m_plugin->isActive());
++        QVERIFY(b.call(QStringLiteral("start")));
++        QVERIFY(a.call(QStringLiteral("stop")));
++        QTest::qWait(50); // a stop would come with the (zero) stop delay
++        QVERIFY(m_plugin->isActive()); // b still wants it
++        QVERIFY(a.call(QStringLiteral("stop"))); // again: no effect
++        QVERIFY(b.call(QStringLiteral("stop")));
++        QTRY_VERIFY(!m_plugin->isActive());
++    }
++
++    void vanishedDbusCallerIsForgotten()
++    {
++        m_plugin->setStopDelayForTesting(0);
++        {
++            DbusCaller a(m_plugin, QStringLiteral("callerA"));
++            QVERIFY(a.call(QStringLiteral("start")));
++            QVERIFY(m_plugin->isActive());
++        } // a's bus connection goes away without stop()
++        QTRY_VERIFY(!m_plugin->isActive());
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), false);
++    }
++
++    void callerGoneBeforeStartIsHandledIsIgnored()
++    {
++        m_plugin->setStopDelayForTesting(0);
++        DbusCaller a(m_plugin, QStringLiteral("callerA"));
++        DbusCaller b(m_plugin, QStringLiteral("callerB"));
++        a.send(QStringLiteral("start"));
++        a.leave(); // gone before the plugin even sees start()
++        QVERIFY(b.call(QStringLiteral("stop"))); // handled after a's start()
++        QTest::qWait(50);
++        QVERIFY(!m_plugin->isActive());
++        QCOMPARE(m_device->getSentPackets(), 0);
++    }
++
++    void localAndDbusCallersAreIndependent()
++    {
++        m_plugin->setStopDelayForTesting(0);
++        DbusCaller a(m_plugin, QStringLiteral("callerA"));
++        QVERIFY(a.call(QStringLiteral("start")));
++        m_plugin->start(); // not from D-Bus
++        QVERIFY(a.call(QStringLiteral("stop")));
++        QTest::qWait(50);
++        QVERIFY(m_plugin->isActive());
++        m_plugin->stop();
++        QTRY_VERIFY(!m_plugin->isActive());
++    }
++
++    void reconnectResendsEnable()
++    {
++        m_plugin->start();
++        const int before = m_device->getSentPackets();
++        m_plugin->connected();
++        QCOMPARE(m_device->getSentPackets(), before + 1);
++        QVERIFY(m_device->getLastPacket());
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), true);
++    }
++
++    void disablingClosesServerAndPortChangeRelistens()
++    {
++        enableOutput(true);
++        QVERIFY(m_plugin->isNmeaServerListening());
++        m_port = freePort();
++        enableOutput(true); // new port: listens again
++        QCOMPARE(m_plugin->nmeaServerPort(), m_port);
++        enableOutput(true); // unchanged: stays listening
++        QCOMPARE(m_plugin->nmeaServerPort(), m_port);
++        enableOutput(false);
++        QVERIFY(!m_plugin->isNmeaServerListening());
++    }
++
++    void destroyingActivePluginStopsTheDevice()
++    {
++        m_plugin->start();
++        const int before = m_device->getSentPackets();
++        delete m_plugin;
++        m_plugin = nullptr;
++        QCOMPARE(m_device->getSentPackets(), before + 1);
++        QVERIFY(m_device->getLastPacket());
++        QCOMPARE(m_device->getLastPacket()->type(), PACKET_TYPE_GEOLOCATION_REQUEST);
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), false);
++    }
++
++    void destroyingActivePluginOnUnpairedDeviceSendsNothing()
++    {
++        m_plugin->start();
++        QVERIFY(m_device->isPaired()); // TestDevice starts paired
++        m_device->unpair(); // Device::sendPacket asserts isPaired() for non-pair packets
++        QVERIFY(!m_device->isPaired());
++        const int before = m_device->getSentPackets();
++        delete m_plugin;
++        m_plugin = nullptr;
++        QCOMPARE(m_device->getSentPackets(), before);
++    }
++
++    void destroyingActivePluginOnUnreachableDeviceSendsNothing()
++    {
++        m_plugin->start();
++        m_device->reachable = false;
++        const int before = m_device->getSentPackets();
++        delete m_plugin;
++        m_plugin = nullptr;
++        QCOMPARE(m_device->getSentPackets(), before);
++    }
++
++    void destroyingPluginWithConnectedClientStopsOnce()
++    {
++        enableOutput(true);
++        QTcpSocket client;
++        client.connectToHost(QHostAddress::LocalHost, m_port);
++        QTRY_VERIFY(m_plugin->isActive());
++        const int before = m_device->getSentPackets();
++        delete m_plugin; // ~NmeaServer drops the client after the tracker is gone
++        m_plugin = nullptr;
++        QCOMPARE(m_device->getSentPackets(), before + 1);
++        QCOMPARE(m_device->getLastPacket()->get<bool>(QStringLiteral("enable")), false);
++        QTRY_COMPARE(client.state(), QAbstractSocket::UnconnectedState);
++    }
++
++    void destroyingIdlePluginSendsNothing()
++    {
++        delete m_plugin;
++        m_plugin = nullptr;
++        QCOMPARE(m_device->getSentPackets(), 0);
++    }
++
++    void destroyingDeviceWithActivePluginSendsNothing()
++    {
++        m_plugin->start();
++        QVERIFY(m_plugin->isActive());
++        QCOMPARE(m_plugin->parent(), m_device);
++        // ~Device frees its links before ~QObject deletes the plugin (a child):
++        // the plugin must not send then. Under ASan/valgrind a send is a use-after-free.
++        QPointer<GeolocationPlugin> plugin = m_plugin;
++        delete m_device;
++        m_device = nullptr;
++        m_plugin = nullptr;
++        QVERIFY(plugin.isNull());
++    }
++
++    void invalidPortIsRejected_data()
++    {
++        QTest::addColumn<int>("port");
++        QTest::newRow("zero") << 0;
++        QTest::newRow("too large") << 70000;
++    }
++
++    void invalidPortIsRejected()
++    {
++        QFETCH(int, port);
++        enableOutput(true);
++        QVERIFY(m_plugin->isNmeaServerListening());
++
++        const QRegularExpression notification(QStringLiteral("geolocationServerFailed.*Invalid port %1 ").arg(port));
++        QTest::ignoreMessage(QtWarningMsg, QStringLiteral("invalid port %1").arg(port).toUtf8().constData());
++        QTest::ignoreMessage(QtDebugMsg, notification);
++        m_plugin->config()->set(QStringLiteral("nmeaPort"), port);
++        QMetaObject::invokeMethod(m_plugin, "applyConfig");
++        QVERIFY(!m_plugin->isNmeaServerListening());
++
++        // same with the warning category switched off: both logging branches must run for full branch coverage
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.plugin.geolocation.warning=false"));
++        QTest::ignoreMessage(QtDebugMsg, notification);
++        QMetaObject::invokeMethod(m_plugin, "applyConfig");
++        QVERIFY(!m_plugin->isNmeaServerListening());
++        QLoggingCategory::setFilterRules(QString());
++    }
++
++    void portInUseIsReportedNotFatal()
++    {
++        QTcpServer blocker;
++        QVERIFY(blocker.listen(QHostAddress::LocalHost, m_port));
++        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^cannot listen on port %1 ").arg(m_port)));
++        enableOutput(true);
++        QVERIFY(!m_plugin->isNmeaServerListening());
++
++        // same failure with the warning category switched off: both logging branches must run for full branch coverage
++        QLoggingCategory::setFilterRules(QStringLiteral("kdeconnect.plugin.geolocation.warning=false"));
++        m_plugin->config()->set(QStringLiteral("nmeaEnabled"), false);
++        QMetaObject::invokeMethod(m_plugin, "applyConfig");
++        enableOutput(true);
++        QVERIFY(!m_plugin->isNmeaServerListening());
++        QLoggingCategory::setFilterRules(QString());
++    }
++};
++
++QTEST_MAIN(GeolocationPluginTest)
++#include "geolocationplugintest.moc"
+diff --git a/tests/geolocation/nmeaservertest.cpp b/tests/geolocation/nmeaservertest.cpp
+new file mode 100644
+index 000000000..37b8c29ce
+--- /dev/null
++++ b/tests/geolocation/nmeaservertest.cpp
+@@ -0,0 +1,192 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "nmeaserver.h"
++
++#include <QDeadlineTimer>
++#include <QSignalSpy>
++#include <QTcpSocket>
++#include <QTest>
++#include <QTimer>
++
++#include <memory>
++#include <vector>
++
++// Like QTRY_VERIFY, but without its 10 ms naps between event loop passes.
++template<typename Predicate>
++static bool spinUntil(Predicate done)
++{
++    QTimer wakeUp; // WaitForMoreEvents must not block past the deadline
++    wakeUp.start(50);
++    const QDeadlineTimer deadline(5000);
++    while (!done() && !deadline.hasExpired()) {
++        QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents);
++    }
++    return done();
++}
++
++class NmeaServerTest : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void listensOnLocalhostOnly()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        QVERIFY(server.isListening());
++        QVERIFY(server.port() != 0);
++        QCOMPARE(server.address(), QHostAddress(QHostAddress::LocalHost));
++    }
++
++    void broadcastsLinesToEveryClient()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        QSignalSpy count(&server, &NmeaServer::clientCountChanged);
++
++        QTcpSocket a;
++        QTcpSocket b;
++        a.connectToHost(QHostAddress::LocalHost, server.port());
++        b.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(server.clientCount(), 2);
++        QCOMPARE(count.last().at(0).toInt(), 2);
++
++        server.broadcast(QStringLiteral("$GPGSV,1,1,01,01,40,083,46*44"));
++        QTRY_VERIFY(a.canReadLine());
++        QTRY_VERIFY(b.canReadLine());
++        QCOMPARE(a.readLine(), QByteArray("$GPGSV,1,1,01,01,40,083,46*44\r\n"));
++        QCOMPARE(b.readLine(), QByteArray("$GPGSV,1,1,01,01,40,083,46*44\r\n"));
++
++        a.disconnectFromHost();
++        QTRY_COMPARE(server.clientCount(), 1);
++        QCOMPARE(count.last().at(0).toInt(), 1);
++    }
++
++    void closeDropsClients()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        QTcpSocket a;
++        a.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(server.clientCount(), 1);
++
++        server.close();
++        QVERIFY(!server.isListening());
++        QCOMPARE(server.clientCount(), 0);
++        QTRY_COMPARE(a.state(), QAbstractSocket::UnconnectedState);
++    }
++
++    void deletingTheServerDropsClients()
++    {
++        auto *server = new NmeaServer;
++        QVERIFY(server->listen(0));
++        QTcpSocket a;
++        a.connectToHost(QHostAddress::LocalHost, server->port());
++        QTRY_COMPARE(server->clientCount(), 1);
++
++        delete server;
++        QTRY_COMPARE(a.state(), QAbstractSocket::UnconnectedState);
++    }
++
++    void incomingDataIsDiscarded()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        QTcpSocket a;
++        a.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(server.clientCount(), 1);
++        const QList<QTcpSocket *> accepted = server.findChildren<QTcpSocket *>();
++        QCOMPARE(accepted.size(), 1);
++        QSignalSpy received(accepted.first(), &QIODevice::readyRead);
++
++        a.write(QByteArray(64 * 1024, 'x'));
++        QTRY_VERIFY(received.count() > 0);
++        QCOMPARE(accepted.first()->bytesAvailable(), qint64(0)); // nothing piles up
++
++        server.broadcast(QStringLiteral("$GPGSV,1,1,01,01,40,083,46*44"));
++        QTRY_VERIFY(a.canReadLine());
++        QCOMPARE(a.readLine(), QByteArray("$GPGSV,1,1,01,01,40,083,46*44\r\n"));
++    }
++
++    void clientThatDoesNotReadIsDropped()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        QTcpSocket reader;
++        QTcpSocket sleeper;
++        sleeper.setReadBufferSize(1024); // Qt stops reading from the kernel once full
++        reader.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(server.clientCount(), 1);
++        sleeper.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(server.clientCount(), 2);
++
++        qint64 expected = 0;
++        qint64 received = 0;
++        connect(&reader, &QIODevice::readyRead, &reader, [&reader, &received]() {
++            received += reader.readAll().size();
++        });
++        // Fill the kernel buffers of the sleeper; the server's own buffer for it
++        // then grows until the limit is exceeded. The reader keeps up.
++        const QString chunk(8 * 1024, QLatin1Char('x'));
++        for (int i = 0; i < 4000 && server.clientCount() == 2; ++i) {
++            server.broadcast(chunk);
++            expected += chunk.size() + 2;
++            QVERIFY(spinUntil([&]() {
++                return received == expected;
++            }));
++        }
++        QCOMPARE(server.clientCount(), 1);
++        sleeper.setReadBufferSize(0); // read on: now it sees the connection is gone
++        QTRY_COMPARE(sleeper.state(), QAbstractSocket::UnconnectedState);
++        QCOMPARE(reader.state(), QAbstractSocket::ConnectedState);
++    }
++
++    void connectionsBeyondTheLimitAreClosed()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        std::vector<std::unique_ptr<QTcpSocket>> clients;
++        for (int i = 0; i < NmeaServer::MaxClients; ++i) {
++            clients.push_back(std::make_unique<QTcpSocket>());
++            clients.back()->connectToHost(QHostAddress::LocalHost, server.port());
++            QTRY_COMPARE(server.clientCount(), i + 1);
++        }
++        QCOMPARE(server.clientCount(), 16);
++        QSignalSpy count(&server, &NmeaServer::clientCountChanged);
++
++        QTcpSocket extra;
++        extra.connectToHost(QHostAddress::LocalHost, server.port());
++        QTRY_COMPARE(extra.state(), QAbstractSocket::UnconnectedState);
++        QCOMPARE(server.clientCount(), 16);
++        QCOMPARE(count.count(), 0);
++        for (const auto &client : clients) {
++            QCOMPARE(client->state(), QAbstractSocket::ConnectedState);
++        }
++    }
++
++    void broadcastWithoutClientsDoesNothing()
++    {
++        NmeaServer server;
++        QVERIFY(server.listen(0));
++        server.broadcast(QStringLiteral("$GPGSV,1,1,01,01,40,083,46*44"));
++        QCOMPARE(server.clientCount(), 0);
++        server.close(); // close without clients
++        QVERIFY(!server.isListening());
++    }
++
++    void portInUseFails()
++    {
++        NmeaServer first;
++        QVERIFY(first.listen(0));
++        NmeaServer second;
++        QVERIFY(!second.listen(first.port()));
++        QVERIFY(!second.errorString().isEmpty());
++    }
++};
++
++QTEST_GUILESS_MAIN(NmeaServerTest)
++#include "nmeaservertest.moc"
+diff --git a/tests/geolocation/nmeatest.cpp b/tests/geolocation/nmeatest.cpp
+new file mode 100644
+index 000000000..be19f1ac3
+--- /dev/null
++++ b/tests/geolocation/nmeatest.cpp
+@@ -0,0 +1,264 @@
++/**
++ * SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++ *
++ * SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
++ */
++
++#include "nmea.h"
++
++#include <QTest>
++#include <QTimeZone>
++
++// "$" + body + "*" + the correct checksum of body.
++static QString withChecksum(const QString &body)
++{
++    uint sum = 0;
++    for (const QChar c : body) {
++        sum ^= c.unicode();
++    }
++    return QLatin1Char('$') + body + QLatin1Char('*') + QString::number(sum, 16).toUpper().rightJustified(2, QLatin1Char('0'));
++}
++
++class NmeaTest : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void checksum_data()
++    {
++        QTest::addColumn<QString>("sentence");
++        QTest::addColumn<bool>("valid");
++        QTest::newRow("rmc") << QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,10.0,271.5,061026,,,A*7B") << true;
++        QTest::newRow("lowercase hex") << QStringLiteral("$GNGGA,123519.00,,,,,0,00,99.9,,,,,,*4c") << true;
++        QTest::newRow("wrong checksum") << QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,10.0,271.5,061026,,,A*7C") << false;
++        QTest::newRow("no dollar") << QStringLiteral("GNRMC,123519.00,A*7B") << false;
++        QTest::newRow("no star") << QStringLiteral("$GNRMC,123519.00,A") << false;
++        QTest::newRow("star not 3 from end") << QStringLiteral("$GNRMC*7BX") << false;
++        QTest::newRow("not hex") << QStringLiteral("$GNRMC,1*ZZ") << false;
++        QTest::newRow("empty") << QString() << false;
++        // The XOR of a pair of equal characters is 0, so these would pass a bare checksum test.
++        QTest::newRow("non-ASCII pair") << QStringLiteral("$GPGSV\u0100\u0100,1,1,01,01,40,083,46*44") << false;
++        QTest::newRow("embedded CR LF") << QStringLiteral("$GPGSV,1,1,01\r\n\r\n,01,40,083,46*44") << false;
++        QTest::newRow("checksum with sign") << QStringLiteral("$GPGSV,1,1,01,01,40,083,46E*+1") << false;
++        QTest::newRow("checksum with space") << QStringLiteral("$GPGSV,1,1,01,01,40,083,46E* 1") << false;
++        QTest::newRow("checksum with space after") << QStringLiteral("$GPGSV,1,1,01,01,40,083,46E*1 ") << false;
++    }
++
++    void checksum()
++    {
++        QFETCH(QString, sentence);
++        QFETCH(bool, valid);
++        QCOMPARE(Nmea::hasValidChecksum(sentence), valid);
++    }
++
++    void lengthIsLimited()
++    {
++        const QString longest = withChecksum(QStringLiteral("GPTXT,") + QString(118, QLatin1Char('A')));
++        QCOMPARE(longest.size(), 128);
++        QVERIFY(Nmea::hasValidChecksum(longest));
++        const QString tooLong = withChecksum(QStringLiteral("GPTXT,") + QString(119, QLatin1Char('A')));
++        QCOMPARE(tooLong.size(), 129);
++        QVERIFY(!Nmea::hasValidChecksum(tooLong));
++    }
++
++    void rmcNorthEast()
++    {
++        GeoFix fix;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,10.0,271.5,061026,,,A*7B")));
++        QCOMPARE(fix.latitude, 50.0 + 46.836 / 60.0);
++        QCOMPARE(fix.longitude, 5.0 + 27.852 / 60.0);
++        QCOMPARE(fix.speed, 10.0 * 1852.0 / 3600.0);
++        QCOMPARE(fix.bearing, 271.5);
++        QCOMPARE(fix.timestamp, QDateTime(QDate(2026, 10, 6), QTime(12, 35, 19), QTimeZone::UTC));
++        QVERIFY(qIsNaN(fix.altitude));
++    }
++
++    void rmcSouthWestWithoutSpeedAndCourse()
++    {
++        GeoFix fix;
++        fix.speed = 3.0;
++        fix.bearing = 90.0;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GPRMC,000001.00,A,1435.4100,S,12058.6200,W,,,010126,,,A*58")));
++        QCOMPARE(fix.latitude, -(14.0 + 35.41 / 60.0));
++        QCOMPARE(fix.longitude, -(120.0 + 58.62 / 60.0));
++        QVERIFY(qIsNaN(fix.speed));
++        QVERIFY(qIsNaN(fix.bearing));
++        QCOMPARE(fix.timestamp, QDateTime(QDate(2026, 1, 1), QTime(0, 0, 1), QTimeZone::UTC));
++    }
++
++    void rmcVoidIsIgnored()
++    {
++        GeoFix fix;
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNRMC,123520.00,V,,,,,,,061026,,,N*67")));
++        QVERIFY(qIsNaN(fix.latitude));
++    }
++
++    void rmcTooShortIsIgnored()
++    {
++        GeoFix fix;
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N*5D")));
++    }
++
++    void gga()
++    {
++        GeoFix fix;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNGGA,123519.00,5046.8360,N,00527.8520,E,1,08,0.9,108.4,M,46.9,M,,*7D")));
++        QCOMPARE(fix.latitude, 50.0 + 46.836 / 60.0);
++        QCOMPARE(fix.longitude, 5.0 + 27.852 / 60.0);
++        QCOMPARE(fix.altitude, 108.4);
++        QVERIFY(!fix.timestamp.isValid());
++    }
++
++    void ggaWithoutFixIsIgnored()
++    {
++        GeoFix fix;
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNGGA,123519.00,,,,,0,00,99.9,,,,,,*4C")));
++    }
++
++    void otherSentencesAreIgnored()
++    {
++        GeoFix fix;
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GPGSV,1,1,01,01,40,083,46*44")));
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GN*")));
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNGGA,123519.00*00"))); // too short
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNGGA,123519.00,5046.8360,N,00527.8520,E,,08,0.9,108.4,M*00"))); // empty quality
++    }
++
++    void coordinateMustBeInRange_data()
++    {
++        QTest::addColumn<QString>("lat");
++        QTest::addColumn<QString>("ns");
++        QTest::addColumn<QString>("lon");
++        QTest::addColumn<QString>("ew");
++        QTest::newRow("nan") << QStringLiteral("nan") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("inf") << QStringLiteral("5046.8360") << QStringLiteral("N") << QStringLiteral("inf") << QStringLiteral("E");
++        QTest::newRow("lat 99 deg 99 min") << QStringLiteral("9999.0") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("lon 999 deg 99 min") << QStringLiteral("5046.8360") << QStringLiteral("N") << QStringLiteral("99999.0") << QStringLiteral("E");
++        QTest::newRow("negative") << QStringLiteral("-5046.8") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("plus sign") << QStringLiteral("+5046.8") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("exponent") << QStringLiteral("1e2") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("two dots") << QStringLiteral("50.46.8") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("leading dot") << QStringLiteral(".5") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("minutes 60") << QStringLiteral("5060.0") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("lat 91") << QStringLiteral("9100.0") << QStringLiteral("S") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("lat with E") << QStringLiteral("5046.8360") << QStringLiteral("E") << QStringLiteral("00527.8520") << QStringLiteral("N");
++        QTest::newRow("lat with W") << QStringLiteral("5046.8360") << QStringLiteral("W") << QStringLiteral("00527.8520") << QStringLiteral("E");
++        QTest::newRow("lon with S") << QStringLiteral("5046.8360") << QStringLiteral("N") << QStringLiteral("00527.8520") << QStringLiteral("S");
++        QTest::newRow("lon 181") << QStringLiteral("5046.8360") << QStringLiteral("N") << QStringLiteral("18100.0") << QStringLiteral("W");
++    }
++
++    void coordinateMustBeInRange()
++    {
++        QFETCH(QString, lat);
++        QFETCH(QString, ns);
++        QFETCH(QString, lon);
++        QFETCH(QString, ew);
++        GeoFix fix;
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,%1,%2,%3,%4,,,061026*00").arg(lat, ns, lon, ew)));
++        QVERIFY(qIsNaN(fix.latitude));
++    }
++
++    void coordinateLimitsAreValid()
++    {
++        GeoFix fix;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,9000.0,S,18000,W,,,061026*00")));
++        QCOMPARE(fix.latitude, -90.0);
++        QCOMPARE(fix.longitude, -180.0);
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5059.99,N,00000.,E,,,061026*00")));
++        QCOMPARE(fix.latitude, 50.0 + 59.99 / 60.0);
++        QCOMPARE(fix.longitude, 0.0);
++    }
++
++    void nonFiniteSpeedCourseAltitudeAreUnknown()
++    {
++        GeoFix fix;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,inf,-inf,061026*00")));
++        QVERIFY(qIsNaN(fix.speed));
++        QVERIFY(qIsNaN(fix.bearing));
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,nan,nan,061026*00")));
++        QVERIFY(qIsNaN(fix.speed));
++        QVERIFY(qIsNaN(fix.bearing));
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNGGA,123519.00,5046.8360,N,00527.8520,E,1,08,0.9,inf,M,46.9,M,,*00")));
++        QVERIFY(qIsNaN(fix.altitude));
++    }
++
++    void speedAndCourseMustBeInRange_data()
++    {
++        QTest::addColumn<QString>("speed");
++        QTest::addColumn<QString>("course");
++        QTest::addColumn<double>("expectedSpeed"); // NaN = unknown
++        QTest::addColumn<double>("expectedCourse");
++        QTest::newRow("zero") << QStringLiteral("0.0") << QStringLiteral("0.0") << 0.0 << 0.0;
++        QTest::newRow("just below 360") << QStringLiteral("1.0") << QStringLiteral("359.9") << 1852.0 / 3600.0 << 359.9;
++        QTest::newRow("negative speed") << QStringLiteral("-1.0") << QStringLiteral("90.0") << qQNaN() << 90.0;
++        QTest::newRow("negative course") << QStringLiteral("1.0") << QStringLiteral("-0.5") << 1852.0 / 3600.0 << qQNaN();
++        QTest::newRow("course 360") << QStringLiteral("1.0") << QStringLiteral("360.0") << 1852.0 / 3600.0 << qQNaN();
++    }
++
++    void speedAndCourseMustBeInRange()
++    {
++        QFETCH(QString, speed);
++        QFETCH(QString, course);
++        QFETCH(double, expectedSpeed);
++        QFETCH(double, expectedCourse);
++        GeoFix fix;
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,00527.8520,E,%1,%2,061026*00").arg(speed, course)));
++        QCOMPARE(qIsNaN(fix.speed), qIsNaN(expectedSpeed));
++        QCOMPARE(qIsNaN(fix.bearing), qIsNaN(expectedCourse));
++        if (!qIsNaN(expectedSpeed)) {
++            QCOMPARE(fix.speed, expectedSpeed);
++        }
++        if (!qIsNaN(expectedCourse)) {
++            QCOMPARE(fix.bearing, expectedCourse);
++        }
++    }
++
++    void timestamp_data()
++    {
++        QTest::addColumn<QString>("time");
++        QTest::addColumn<QString>("date");
++        QTest::addColumn<QDateTime>("expected");
++        const QDate day(2026, 10, 6);
++        QTest::newRow("whole seconds") << QStringLiteral("123519") << QStringLiteral("061026") << QDateTime(day, QTime(12, 35, 19), QTimeZone::UTC);
++        QTest::newRow("tenths") << QStringLiteral("123519.5") << QStringLiteral("061026") << QDateTime(day, QTime(12, 35, 19, 500), QTimeZone::UTC);
++        QTest::newRow("hundredths") << QStringLiteral("123519.50") << QStringLiteral("061026") << QDateTime(day, QTime(12, 35, 19, 500), QTimeZone::UTC);
++        QTest::newRow("milliseconds") << QStringLiteral("123519.123") << QStringLiteral("061026") << QDateTime(day, QTime(12, 35, 19, 123), QTimeZone::UTC);
++        QTest::newRow("beyond milliseconds") << QStringLiteral("123519.1239") << QStringLiteral("061026")
++                                             << QDateTime(day, QTime(12, 35, 19, 123), QTimeZone::UTC);
++        QTest::newRow("empty time") << QString() << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("bad time") << QStringLiteral("126519.00") << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("short time") << QStringLiteral("1235") << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("letter in time") << QStringLiteral("12a519") << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("seventh digit") << QStringLiteral("1235190") << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("letter in fraction") << QStringLiteral("123519.5x") << QStringLiteral("061026") << QDateTime();
++        QTest::newRow("empty fraction") << QStringLiteral("123519.") << QStringLiteral("061026") << QDateTime(day, QTime(12, 35, 19), QTimeZone::UTC);
++        QTest::newRow("empty date") << QStringLiteral("123519.00") << QString() << QDateTime();
++    }
++
++    void timestamp()
++    {
++        QFETCH(QString, time);
++        QFETCH(QString, date);
++        QFETCH(QDateTime, expected);
++        GeoFix fix;
++        fix.timestamp = QDateTime(QDate(2000, 1, 1), QTime(0, 0), QTimeZone::UTC); // overwritten
++        QVERIFY(Nmea::update(fix, QStringLiteral("$GNRMC,%1,A,5046.8360,N,00527.8520,E,,,%2*00").arg(time, date)));
++        QCOMPARE(fix.timestamp.isValid(), expected.isValid());
++        if (expected.isValid()) {
++            QCOMPARE(fix.timestamp, expected);
++        }
++    }
++
++    void badCoordinateIsIgnored()
++    {
++        GeoFix fix;
++        // checksum is not checked by update(); the plugin checks it first
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,50x6.8360,N,00527.8520,E,,,061026*00")));
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNRMC,123519.00,A,5046.8360,N,,E,,,061026*00")));
++        QVERIFY(!Nmea::update(fix, QStringLiteral("$GNGGA,123519.00,5046.8360,X,00527.8520,E,1,08,0.9,108.4,M*00")));
++        QVERIFY(qIsNaN(fix.latitude));
++    }
++};
++
++QTEST_GUILESS_MAIN(NmeaTest)
++#include "nmeatest.moc"
+diff --git a/tests/pluginloadtest.cpp b/tests/pluginloadtest.cpp
+index 67b7d7d8c..6584a683e 100644
+--- a/tests/pluginloadtest.cpp
++++ b/tests/pluginloadtest.cpp
+@@ -64,6 +64,7 @@ private Q_SLOTS:
+         device->setPluginEnabled(QStringLiteral("kdeconnect_mousepad"), true);
+         QCOMPARE(device->isPluginEnabled(QStringLiteral("kdeconnect_mousepad")), true);
+         QVERIFY(device->supportedPlugins().contains(QStringLiteral("kdeconnect_remotecontrol")));
++        QVERIFY(device->supportedPlugins().contains(QStringLiteral("kdeconnect_geolocation")));
+     }
+ 
+ private:

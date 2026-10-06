@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<longdescription>
+		The ::gentoo ebuild with the geolocation plugin added: receives the
+		phone's location (kdeconnect-android MR !529) and offers it as NMEA on
+		localhost and on D-Bus. Dropped again once upstream merges the plugin.
+	</longdescription>
+	<upstream>
+		<bugs-to>https://bugs.kde.org/enter_bug.cgi?product=kdeconnect</bugs-to>
+		<remote-id type="cpe">cpe:/a:kde:kdeconnect</remote-id>
+		<remote-id type="kde-invent">network/kdeconnect-kde</remote-id>
+	</upstream>
+	<use>
+		<flag name="pulseaudio">Enable system volume control plugin using <pkg>media-libs/libpulse</pkg></flag>
+		<flag name="telephony">Enable telephony plugin using <pkg>kde-frameworks/modemmanager-qt</pkg></flag>
+		<flag name="X">Enable remote input mousepad/shareinputdevices plugins relying on X11 libs</flag>
+	</use>
+</pkgmetadata>

@@ -206,6 +206,33 @@ also keeps systemd-networkd from deleting the rule. After installing, run
 Full explanation, diagnosis, configuration and a non-Gentoo version:
 [docs/tailscale-lan-route.md](docs/tailscale-lan-route.md).
 
+### KDE Connect with location sharing — `kde-misc/kdeconnect`
+
+The `::gentoo` ebuild of KDE Connect with an extra **geolocation plugin**
+(the desktop side of
+[kdeconnect-android MR !529](https://invent.kde.org/network/kdeconnect-android/-/merge_requests/529)).
+The phone sends its GPS position; the plugin
+
+- offers it as NMEA 0183 sentences on a TCP port on **localhost only**
+  (default 10110), for programs like QMapShack or gpsd;
+- exposes the position on D-Bus;
+- asks the phone for its location **only while someone listens** (an NMEA
+  client or a D-Bus caller) and tells it to stop afterwards.
+
+The NMEA output is off by default. The patch is pending upstream review; this
+copy (revision `-r100`, so it wins over `::gentoo`) is dropped again once the
+plugin is merged into KDE Connect. When `::gentoo` bumps KDE Connect, the patch
+is rebased and a new `-r100` is added here.
+
+The phone needs a KDE Connect build that includes MR !529 (the release on
+Google Play/F-Droid does not yet), and the plugin must be enabled for the
+device. To use the phone as a GPS in QMapShack:
+
+1. KDE Connect settings → the phone → *Location* plugin → configure →
+   enable **Offer this device's location to applications** (port 10110).
+2. QMapShack → *Realtime* → add source *GPS Tether* → host `localhost`,
+   port `10110`, *auto. conn.*
+
 ## Installation
 
 With `app-eselect/eselect-repository`:
@@ -276,6 +303,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `dev-python/standardwebhooks` | 1.0.1 | Standard Webhooks reference library | MIT | copy from `::guru`; anthropic test dependency |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
+| `kde-misc/kdeconnect` | 26.04.3-r100 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) | GPL-2+ | `::gentoo` ebuild + patch; needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
