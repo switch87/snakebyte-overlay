@@ -243,6 +243,30 @@ over the VPN by itself after it left the home Wi-Fi. A connection that stops
 acknowledging data is dropped after 60 s instead of hanging for many minutes.
 Also included: the upstream TCP keepalive tuning from master (not in 26.04).
 
+### Touch screen edge rejection — `kde-plasma/kwin` and `kde-plasma/plasma-desktop`
+
+Some touch screens (here a Wacom HID 5412 in a ThinkPad L13 2-in-1) report
+ghost touches along the edges: a greasy bezel, a thumb holding the lid, or the
+charger's noise. The screen only reports positions (no pressure or contact
+size), so its sensitivity cannot be tuned, but edge ghosts can be recognised:
+they start very close to an edge and do not move.
+
+These packages are the `::gentoo` 6.7.5 ebuilds with one patch each:
+
+- **KWin**: a touch that starts closer than a per-device width to an edge of
+  the touch screen is held back; it is delivered (with its original start) as
+  soon as it moves more than 3 mm, so edge swipes keep working, and dropped if
+  it ends before that. Width 0–10 mm, off by default; D-Bus property
+  `touchEdgeRejectionWidth` on `org.kde.KWin.InputDevice`, stored in
+  `kcminputrc`.
+- **plasma-desktop**: the setting in System Settings → Touchscreen ("Ignore
+  touches starting near the edge", with the width in pixels).
+
+Install both together (plasma-desktop needs the patched KWin at build time),
+then log out and in again. Not part of KDE; dropped again if KWin gains this
+itself. Back to `::gentoo`:
+`emerge --oneshot =kde-plasma/kwin-6.7.5-r1 =kde-plasma/plasma-desktop-6.7.5`.
+
 ## Installation
 
 With `app-eselect/eselect-repository`:
@@ -323,6 +347,8 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
+| `kde-plasma/kwin` | 6.7.5-r101 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |
+| `kde-plasma/plasma-desktop` | 6.7.5-r101 | Plasma desktop with the edge rejection setting in the Touchscreen KCM | GPL-2+ | `::gentoo` ebuild + patch; needs kwin-6.7.5-r101 |
 | `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |
 
 All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
