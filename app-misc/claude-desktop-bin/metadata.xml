@@ -2,7 +2,7 @@
 <!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
 <pkgmetadata>
 	<maintainer type="person">
-		<email>pellingert@gmail.com</email>
+		<email>gert@pellin.be</email>
 		<name>Gert Pellin</name>
 	</maintainer>
 	<use>

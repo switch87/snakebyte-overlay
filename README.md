@@ -300,7 +300,7 @@ All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
 
 ## Contributors
 
-- **Gert Pellin** (`switch87`) — maintainer — pellingert@gmail.com
+- **Gert Pellin** (`switch87`) — maintainer — gert@pellin.be
 
 ## License
 
