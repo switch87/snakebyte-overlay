@@ -219,10 +219,10 @@ The phone sends its GPS position; the plugin
 - asks the phone for its location **only while someone listens** (an NMEA
   client or a D-Bus caller) and tells it to stop afterwards.
 
-The NMEA output is off by default. The patches are pending upstream review; this
-copy (revision `-r101`, so it wins over `::gentoo`) is dropped again once the
-plugins are merged into KDE Connect. When `::gentoo` bumps KDE Connect, the patches
-are rebased and a new `-r101` is added here.
+The NMEA output is off by default. These patches are not part of KDE Connect;
+this copy (revision `-r101`, so it wins over `::gentoo`) is dropped again if
+KDE Connect itself gains these features. When `::gentoo` bumps KDE Connect, the
+patches are rebased and a new `-r101` is added here.
 
 The phone needs a KDE Connect build that includes MR !529 (the release on
 Google Play/F-Droid does not yet), and the plugin must be enabled for the
