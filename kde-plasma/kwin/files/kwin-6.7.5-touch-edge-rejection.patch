@@ -1,0 +1,320 @@
+Touch edge rejection for KWin 6.7.5 (branch touchscreen-edge-rejection in
+~/Workspace/src/kwin, not upstream): a touch that starts closer than a
+per-device width to an edge of a touch screen is held back until it moves
+more than 3 mm, and dropped when it ends before that. The width is the
+InputDevice D-Bus property touchEdgeRejectionWidth (TouchEdgeRejectionWidth
+in kcminputrc, 0 to 10 mm, default 0 = off).
+
+Generated with: git diff v6.7.5 touchscreen-edge-rejection-6.7.5 -- . ':!autotests'
+in ~/Workspace/src/kwin-6.7.5 (the tests ran on that branch; the ebuild has
+RESTRICT="test"). Applies with -p1 to kwin-6.7.5.tar.xz after
+kwin-6.7.5-patchset-1.
+
+diff --git a/src/backends/libinput/CMakeLists.txt b/src/backends/libinput/CMakeLists.txt
+index 1a19d1c..9d76922 100644
+--- a/src/backends/libinput/CMakeLists.txt
++++ b/src/backends/libinput/CMakeLists.txt
+@@ -21,5 +21,6 @@ target_sources(kwin PRIVATE
+     events.cpp
+     libinput_logging.cpp
+     libinputbackend.cpp
++    touchedgefilter.cpp
+ )
+ target_link_libraries(kwin PRIVATE Libinput::Libinput)
+diff --git a/src/backends/libinput/connection.cpp b/src/backends/libinput/connection.cpp
+index 1a644d2..05bd47f 100644
+--- a/src/backends/libinput/connection.cpp
++++ b/src/backends/libinput/connection.cpp
+@@ -178,7 +178,7 @@ void Connection::handleEvent()
+         if (!event) {
+             break;
+         }
+-        m_eventQueue.push_back(std::move(event));
++        TouchEdgeFilter::enqueue(std::move(event), m_eventQueue);
+     } while (true);
+     if (wasEmpty && !m_eventQueue.empty()) {
+         Q_EMIT eventsRead();
+diff --git a/src/backends/libinput/device.cpp b/src/backends/libinput/device.cpp
+index 3bb29ae..2b1a0af 100644
+--- a/src/backends/libinput/device.cpp
++++ b/src/backends/libinput/device.cpp
+@@ -22,6 +22,7 @@
+ #include <QDBusConnection>
+ #include <QDBusMetaType>
+ 
++#include <cmath>
+ #include <linux/input.h>
+ 
+ #ifndef KWIN_BUILD_TESTING
+@@ -161,6 +162,7 @@ enum class ConfigKey {
+     InputArea,
+     TabletToolRelativeMode,
+     Rotation,
++    TouchEdgeRejectionWidth,
+     OutputUuid,
+ };
+ 
+@@ -270,6 +272,7 @@ static const QMap<ConfigKey, std::shared_ptr<ConfigDataBase>> s_configData{
+     {ConfigKey::InputArea, std::make_shared<ConfigData<QRectF>>(QByteArrayLiteral("InputArea"), &Device::setInputArea, &Device::defaultInputArea)},
+     {ConfigKey::TabletToolRelativeMode, std::make_shared<ConfigData<bool>>(QByteArrayLiteral("TabletToolRelativeMode"), &Device::setTabletToolRelative, &Device::defaultTabletToolIsRelative)},
+     {ConfigKey::Rotation, std::make_shared<ConfigData<uint32_t>>(QByteArrayLiteral("Rotation"), &Device::setRotation, &Device::defaultRotation)},
++    {ConfigKey::TouchEdgeRejectionWidth, std::make_shared<ConfigData<double>>(QByteArrayLiteral("TouchEdgeRejectionWidth"), &Device::setTouchEdgeRejectionWidth, &Device::defaultTouchEdgeRejectionWidth)},
+ };
+ 
+ namespace
+@@ -799,6 +802,19 @@ void Device::setScrollFactor(qreal factor)
+     }
+ }
+ 
++void Device::setTouchEdgeRejectionWidth(double width)
++{
++    if (!supportsTouchEdgeRejection() || std::isnan(width)) {
++        return;
++    }
++    width = std::clamp(width, 0.0, TouchEdgeFilter::MaximumWidth);
++    if (m_touchEdgeRejectionWidth != width) {
++        m_touchEdgeRejectionWidth = width;
++        writeEntry(ConfigKey::TouchEdgeRejectionWidth, m_touchEdgeRejectionWidth);
++        Q_EMIT touchEdgeRejectionWidthChanged();
++    }
++}
++
+ void Device::setCalibrationMatrix(const QString &value)
+ {
+     const auto matrix = deserializeMatrix(value);
+diff --git a/src/backends/libinput/device.h b/src/backends/libinput/device.h
+index 4905480..112114c 100644
+--- a/src/backends/libinput/device.h
++++ b/src/backends/libinput/device.h
+@@ -10,6 +10,7 @@
+ 
+ #include "core/backendoutput.h"
+ #include "core/inputdevice.h"
++#include "touchedgefilter.h"
+ 
+ #include <libinput.h>
+ 
+@@ -85,6 +86,9 @@ class KWIN_EXPORT Device : public InputDevice
+     Q_PROPERTY(QString calibrationMatrix READ serializedCalibrationMatrix WRITE setCalibrationMatrix NOTIFY calibrationMatrixChanged)
+     Q_PROPERTY(Qt::ScreenOrientation orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
+     Q_PROPERTY(int orientationDBus READ orientation WRITE setOrientationDBus NOTIFY orientationChanged)
++    Q_PROPERTY(bool supportsTouchEdgeRejection READ supportsTouchEdgeRejection CONSTANT)
++    Q_PROPERTY(double defaultTouchEdgeRejectionWidth READ defaultTouchEdgeRejectionWidth CONSTANT)
++    Q_PROPERTY(double touchEdgeRejectionWidth READ touchEdgeRejectionWidth WRITE setTouchEdgeRejectionWidth NOTIFY touchEdgeRejectionWidthChanged)
+ 
+     Q_PROPERTY(bool supportsLeftHanded READ supportsLeftHanded CONSTANT)
+     Q_PROPERTY(bool leftHandedEnabledByDefault READ leftHandedEnabledByDefault CONSTANT)
+@@ -505,6 +509,35 @@ public:
+     static QString serializeMatrix(const QMatrix4x4 &matrix);
+     static QMatrix4x4 deserializeMatrix(const QString &matrix);
+ 
++    /**
++     * Whether touches that start near the edge can be held back: a touch screen
++     * whose size is known.
++     */
++    bool supportsTouchEdgeRejection() const
++    {
++        return m_touch && !m_size.isEmpty();
++    }
++    double defaultTouchEdgeRejectionWidth() const
++    {
++        return defaultValue("TouchEdgeRejectionWidth", 0.0);
++    }
++    /**
++     * Width in mm of the band along the edges in which a touch that starts there
++     * is held back until it moves (see TouchEdgeFilter), 0 when off.
++     */
++    double touchEdgeRejectionWidth() const
++    {
++        return m_touchEdgeRejectionWidth;
++    }
++    /**
++     * Sets the edge rejection width, limited to 0 to TouchEdgeFilter::MaximumWidth mm.
++     */
++    void setTouchEdgeRejectionWidth(double width);
++    TouchEdgeFilter *touchEdgeFilter()
++    {
++        return &m_touchEdgeFilter;
++    }
++
+     QString defaultPressureCurve() const;
+     QEasingCurve pressureCurve() const;
+     QString serializedPressureCurve() const;
+@@ -818,6 +851,7 @@ Q_SIGNALS:
+     void tabletToolRelativeChanged();
+     void rotationChanged();
+     void currentModesChanged();
++    void touchEdgeRejectionWidthChanged();
+ 
+ private:
+     template<typename T>
+@@ -925,6 +959,8 @@ private:
+     bool m_tabletToolIsRelative = false;
+     QList<unsigned int> m_currentModes;
+     bool m_isVirtual = false;
++    double m_touchEdgeRejectionWidth = 0.0;
++    TouchEdgeFilter m_touchEdgeFilter;
+ };
+ 
+ }
+diff --git a/src/backends/libinput/touchedgefilter.cpp b/src/backends/libinput/touchedgefilter.cpp
+new file mode 100644
+index 0000000..55d6a9a
+--- /dev/null
++++ b/src/backends/libinput/touchedgefilter.cpp
+@@ -0,0 +1,79 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#include "touchedgefilter.h"
++#include "device.h"
++#include "events.h"
++
++#include <cmath>
++
++namespace KWin
++{
++namespace LibInput
++{
++
++TouchEdgeFilter::TouchEdgeFilter() = default;
++
++TouchEdgeFilter::~TouchEdgeFilter() = default;
++
++void TouchEdgeFilter::enqueue(std::unique_ptr<Event> event, std::deque<std::unique_ptr<Event>> &queue)
++{
++    const libinput_event_type type = event->type();
++    const bool touch = type >= LIBINPUT_EVENT_TOUCH_DOWN && type <= LIBINPUT_EVENT_TOUCH_FRAME;
++    Device *device = touch ? event->device() : nullptr;
++    if (!device) {
++        queue.push_back(std::move(event));
++        return;
++    }
++    std::unique_ptr<TouchEvent> touchEvent(static_cast<TouchEvent *>(event.release()));
++    device->touchEdgeFilter()->process(std::move(touchEvent), device->touchEdgeRejectionWidth(), device->size(), queue);
++}
++
++void TouchEdgeFilter::process(std::unique_ptr<TouchEvent> event, double width, const QSizeF &size, std::deque<std::unique_ptr<Event>> &queue)
++{
++    switch (event->type()) {
++    case LIBINPUT_EVENT_TOUCH_FRAME:
++        if (m_frameHasEvents) {
++            m_frameHasEvents = false;
++            queue.push_back(std::move(event));
++        }
++        return;
++    case LIBINPUT_EVENT_TOUCH_DOWN: {
++        const QPointF position = event->absolutePos();
++        if (width > 0
++            && (position.x() < width || position.y() < width || size.width() - position.x() < width || size.height() - position.y() < width)) {
++            const qint32 id = event->id();
++            m_held[id] = std::move(event);
++            return;
++        }
++        break;
++    }
++    case LIBINPUT_EVENT_TOUCH_MOTION: {
++        const auto held = m_held.find(event->id());
++        if (held != m_held.end()) {
++            const QPointF moved = event->absolutePos() - held->second->absolutePos();
++            if (std::hypot(moved.x(), moved.y()) <= MoveThreshold) {
++                return;
++            }
++            queue.push_back(std::move(held->second));
++            m_held.erase(held);
++        }
++        break;
++    }
++    default: // up and cancel
++        if (m_held.erase(event->id())) {
++            return;
++        }
++        break;
++    }
++    m_frameHasEvents = true;
++    queue.push_back(std::move(event));
++}
++
++}
++}
+diff --git a/src/backends/libinput/touchedgefilter.h b/src/backends/libinput/touchedgefilter.h
+new file mode 100644
+index 0000000..bfa61b2
+--- /dev/null
++++ b/src/backends/libinput/touchedgefilter.h
+@@ -0,0 +1,70 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-FileCopyrightText: 2026 Gert Pellin <gert@pellin.be>
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++#pragma once
++
++#include "kwin_export.h"
++
++#include <QSizeF>
++
++#include <deque>
++#include <map>
++#include <memory>
++
++namespace KWin
++{
++namespace LibInput
++{
++
++class Event;
++class TouchEvent;
++
++/**
++ * Holds back touches that start close to the edge of a touch screen, against
++ * ghost touches from holding the device or from dirt along the edges.
++ *
++ * A touch whose down position is less than the edge rejection width away from
++ * an edge of the device is held back. When it moves more than MoveThreshold
++ * away from where it started, it is released: its own down event (original
++ * time and position) and the motion that released it are delivered, so edge
++ * swipes keep working. When it ends or is cancelled while held back, it is
++ * dropped. A frame is only delivered when an event was delivered since the
++ * previous frame. Every touch point is judged on its own. Positions and sizes
++ * are in mm, as libinput reports them for touch screens.
++ */
++class KWIN_EXPORT TouchEdgeFilter
++{
++public:
++    /// Distance in mm a held-back touch has to move to be released.
++    static constexpr double MoveThreshold = 3.0;
++    /// Largest edge rejection width in mm.
++    static constexpr double MaximumWidth = 10.0;
++
++    TouchEdgeFilter();
++    ~TouchEdgeFilter();
++
++    /**
++     * Appends @p event to @p queue, unless it is a touch event of a known device:
++     * that one goes through the device's filter, see process().
++     */
++    static void enqueue(std::unique_ptr<Event> event, std::deque<std::unique_ptr<Event>> &queue);
++
++    /**
++     * Passes the touch event @p event of a device of @p size mm through the filter,
++     * with an edge rejection width of @p width mm (0 = off), and appends the events
++     * to deliver now to @p queue.
++     */
++    void process(std::unique_ptr<TouchEvent> event, double width, const QSizeF &size, std::deque<std::unique_ptr<Event>> &queue);
++
++private:
++    std::map<qint32, std::unique_ptr<TouchEvent>> m_held;
++    bool m_frameHasEvents = false;
++};
++
++}
++}

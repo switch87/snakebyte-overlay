@@ -1,0 +1,183 @@
+Touch edge rejection setting for the Touchscreen KCM of plasma-desktop 6.7.5
+(branch touchscreen-edge-rejection in ~/Workspace/src/plasma-desktop, not
+upstream): "Ignore touches starting near the edge" (Off, 0.5 to 10 mm) with
+the width in pixels, bound to KWin's touchEdgeRejectionWidth. Needs the KWin
+patch kwin-6.7.5-touch-edge-rejection.patch at build time (D-Bus interface).
+
+Generated with: git diff v6.7.5 touchscreen-edge-rejection-6.7.5 -- . ':!kcms/libkwindevices/tests'
+in ~/Workspace/src/plasma-desktop-6.7.5 (the tests ran on that branch).
+Applies with -p1 to plasma-desktop-6.7.5.tar.xz after
+plasma-desktop-6.1.80-override-include-dirs.patch.
+
+diff --git a/kcms/libkwindevices/inputdevice.cpp b/kcms/libkwindevices/inputdevice.cpp
+index 76ed376b..9ad24284 100644
+--- a/kcms/libkwindevices/inputdevice.cpp
++++ b/kcms/libkwindevices/inputdevice.cpp
+@@ -29,6 +29,7 @@ InputDevice::InputDevice(const QString &dbusName, QObject *parent)
+     connect(this, &InputDevice::pressureRangeMinChanged, this, &InputDevice::needsSaveChanged);
+     connect(this, &InputDevice::pressureRangeMaxChanged, this, &InputDevice::needsSaveChanged);
+     connect(this, &InputDevice::relativeChanged, this, &InputDevice::needsSaveChanged);
++    connect(this, &InputDevice::touchEdgeRejectionWidthChanged, this, &InputDevice::needsSaveChanged);
+     connect(m_iface.get(), &OrgKdeKWinInputDeviceInterface::currentModesChanged, this, &InputDevice::currentModesChanged);
+ }
+ 
+@@ -45,10 +46,14 @@ void InputDevice::save()
+     m_pressureRangeMin.save();
+     m_pressureRangeMax.save();
+     m_relative.save();
++    m_touchEdgeRejectionWidth.save();
+ }
+ 
+ bool InputDevice::isSaveNeeded() const
+ {
++    if (m_touchEdgeRejectionWidth.changed()) {
++        return true;
++    }
+     return m_leftHanded.changed() || m_orientation.changed() || m_outputName.changed() || m_outputArea.changed() || m_enabled.changed()
+         || m_mapToWorkspace.changed() || m_pressureCurve.changed() || m_inputArea.changed() || m_pressureRangeMin.changed() || m_pressureRangeMax.changed()
+         || m_mapToWorkspace.changed() || m_relative.changed();
+@@ -68,10 +73,14 @@ void InputDevice::defaults()
+     m_pressureRangeMax.resetFromDefaults();
+     m_calibrationMatrix.resetFromDefaults();
+     m_relative.resetFromDefaults();
++    m_touchEdgeRejectionWidth.resetFromDefaults();
+ }
+ 
+ bool InputDevice::isDefaults() const
+ {
++    if (m_touchEdgeRejectionWidth.isSupported() && !m_touchEdgeRejectionWidth.isDefaults()) {
++        return false;
++    }
+     return m_leftHanded.isDefaults() && m_orientation.isDefaults() && m_outputName.isDefaults() && m_outputArea.isDefaults() && m_enabled.isDefaults()
+         && m_mapToWorkspace.isDefaults() && m_pressureCurve.isDefaults() && m_inputArea.isDefaults() && m_pressureRangeMin.isDefaults() && m_pressureRangeMax.isDefaults() && m_calibrationMatrix.isDefaults() && m_relative.isDefaults();
+ }
+@@ -89,6 +98,7 @@ void InputDevice::load()
+     m_pressureRangeMin.resetFromSaved();
+     m_pressureRangeMax.resetFromSaved();
+     m_relative.resetFromSaved();
++    m_touchEdgeRejectionWidth.resetFromSaved();
+ }
+ 
+ void InputDevice::setOrientation(int ori)
+@@ -171,6 +181,11 @@ void InputDevice::setRelative(bool relative)
+     m_relative.set(relative);
+ }
+ 
++void InputDevice::setTouchEdgeRejectionWidth(double width)
++{
++    m_touchEdgeRejectionWidth.set(width);
++}
++
+ } // namespace KWinDevices
+ 
+ #include "moc_inputdevice.cpp"
+diff --git a/kcms/libkwindevices/inputdevice.h b/kcms/libkwindevices/inputdevice.h
+index 1e560e06..801c3d85 100644
+--- a/kcms/libkwindevices/inputdevice.h
++++ b/kcms/libkwindevices/inputdevice.h
+@@ -54,6 +54,8 @@ class InputDevice : public QObject
+     Q_PROPERTY(QList<unsigned int> numModes READ numModes CONSTANT)
+     Q_PROPERTY(QList<unsigned int> currentModes READ currentModes NOTIFY currentModesChanged)
+     Q_PROPERTY(bool isVirtual READ isVirtual CONSTANT)
++    Q_PROPERTY(bool supportsTouchEdgeRejection READ supportsTouchEdgeRejection CONSTANT)
++    Q_PROPERTY(double touchEdgeRejectionWidth READ touchEdgeRejectionWidth WRITE setTouchEdgeRejectionWidth NOTIFY touchEdgeRejectionWidthChanged)
+ 
+ public:
+     InputDevice(const QString &dbusName, QObject *parent);
+@@ -246,6 +248,16 @@ public:
+         return m_isVirtual.value();
+     }
+ 
++    bool supportsTouchEdgeRejection() const
++    {
++        return m_touchEdgeRejectionWidth.isSupported();
++    }
++    double touchEdgeRejectionWidth() const
++    {
++        return m_touchEdgeRejectionWidth.value();
++    }
++    void setTouchEdgeRejectionWidth(double width);
++
+ Q_SIGNALS:
+     void needsSaveChanged();
+ 
+@@ -262,6 +274,7 @@ Q_SIGNALS:
+     void calibrationMatrixChanged();
+     void relativeChanged();
+     void currentModesChanged();
++    void touchEdgeRejectionWidthChanged();
+ 
+ protected:
+     static QString serializeMatrix(const QMatrix4x4 &matrix);
+@@ -453,6 +466,11 @@ private:
+     Prop<bool> m_tabletPad = Prop<bool>(this, "tabletPad");
+     Prop<bool> m_tabletTool = Prop<bool>(this, "tabletTool");
+     Prop<bool> m_isVirtual = Prop<bool>(this, "isVirtual");
++    Prop<double> m_touchEdgeRejectionWidth = Prop<double>(this,
++                                                          "touchEdgeRejectionWidth",
++                                                          &OrgKdeKWinInputDeviceInterface::defaultTouchEdgeRejectionWidth,
++                                                          &OrgKdeKWinInputDeviceInterface::supportsTouchEdgeRejection,
++                                                          &InputDevice::touchEdgeRejectionWidthChanged);
+ 
+     std::unique_ptr<OrgKdeKWinInputDeviceInterface> m_iface;
+ };
+diff --git a/kcms/touchscreen/ui/main.qml b/kcms/touchscreen/ui/main.qml
+index 28f99a46..cceb4d3a 100644
+--- a/kcms/touchscreen/ui/main.qml
++++ b/kcms/touchscreen/ui/main.qml
+@@ -83,5 +83,55 @@ KCMUtils.SimpleKCM {
+                 }
+             }
+         }
++
++        RowLayout {
++            Kirigami.FormData.label: i18nc("@label:spinbox", "Ignore touches starting near the edge:")
++            enabled: root.device?.supportsTouchEdgeRejection ?? false
++            spacing: Kirigami.Units.smallSpacing
++
++            QQC2.SpinBox {
++                id: edgeRejectionSpinBox
++                // in half millimetres: 0 to 10 mm in steps of 0.5 mm
++                from: 0
++                to: 20
++                value: Math.round((root.device?.touchEdgeRejectionWidth ?? 0) * 2)
++                textFromValue: (value, locale) => value === 0
++                    ? i18nc("@item:inrange edge rejection is off", "Off")
++                    : i18nc("@item:inrange distance from the screen edge in millimetres", "%1 mm", Number(value / 2).toLocaleString(locale, 'f', 1))
++                onValueModified: root.device.touchEdgeRejectionWidth = value / 2
++            }
++
++            QQC2.Label {
++                // The band on the screen in logical pixels: the touch screen's longer
++                // side spans the longer side of the screen it is mapped to.
++                readonly property int pixels: {
++                    const device = root.device;
++                    if (!device || edgeRejectionSpinBox.value === 0 || device.size.width <= 0 || device.size.height <= 0) {
++                        return 0;
++                    }
++                    const screens = Application.screens;
++                    let screen = null;
++                    for (let i = 0; i < screens.length; ++i) {
++                        if (screens[i].name === device.outputName) {
++                            screen = screens[i];
++                        }
++                    }
++                    if (!screen && device.outputName === "" && screens.length === 1) {
++                        screen = screens[0];
++                    }
++                    if (!screen) {
++                        return 0;
++                    }
++                    const pixelsPerMillimetre = Math.max(screen.width, screen.height) / Math.max(device.size.width, device.size.height);
++                    return Math.round(edgeRejectionSpinBox.value / 2 * pixelsPerMillimetre);
++                }
++                visible: pixels > 0
++                text: i18nc("@info approximate width on the screen", "≈ %1 px", pixels)
++            }
++
++            Kirigami.ContextualHelpButton {
++                toolTipText: i18nc("@info:tooltip", "Touches that start this close to an edge of the screen are ignored unless they move, so holding the screen at its edge or a dirty edge does not cause taps. Swipes from the edge still work; taps that close to the edge do not.")
++            }
++        }
+     }
+ }
