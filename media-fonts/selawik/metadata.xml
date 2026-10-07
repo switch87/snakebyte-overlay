@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<longdescription lang="en">
+		Selawik is an open-source font by Microsoft, metric-compatible with
+		Segoe UI and meant as its fallback. app-emulation/adobewine maps
+		Segoe UI to it in the Wine prefix when no Windows fonts are given.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">microsoft/Selawik</remote-id>
+	</upstream>
+</pkgmetadata>
