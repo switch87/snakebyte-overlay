@@ -153,6 +153,9 @@ src_prepare() {
 	# AdobeWine: fixes for the Creative Cloud installer, sign-in and the
 	# apps themselves (MSHTML/MSXML, D2D, DirectWrite, heap, WinHTTP, ...)
 	PATCHES+=( "${WORKDIR}"/AdobeWine-${ADOBEWINE_PV}/patches/*.patch )
+	# Draw layered child windows on top of UpdateLayeredWindow windows, as
+	# the Windows 8+ compositor does (Photoshop contextual task bar picker)
+	PATCHES+=( "${FILESDIR}"/${P}-win32u-layered-child-windows.patch )
 
 	wine_src_prepare
 }

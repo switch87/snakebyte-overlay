@@ -1,0 +1,128 @@
+From ec0c2dfe788d4e1aa2e9fd6462f5b710e6a57fa4 Mon Sep 17 00:00:00 2001
+From: Gert Pellin <gert@pellin.be>
+Date: Wed, 7 Oct 2026 09:08:39 +0200
+Subject: [PATCH] win32u: Draw layered child windows on top of
+ UpdateLayeredWindow surfaces.
+
+Since Windows 8 child windows can have WS_EX_LAYERED, and the compositor
+draws them on top of a top-level window that uses UpdateLayeredWindow.
+Photoshop's contextual task bar is such a window: its adjustment ComboBox
+is a layered child and stayed invisible.
+---
+ dlls/win32u/window.c | 93 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 93 insertions(+)
+
+diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
+index a402fcc..6794651 100644
+--- a/dlls/win32u/window.c
++++ b/dlls/win32u/window.c
+@@ -2740,6 +2740,97 @@ BOOL WINAPI NtUserSetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alph
+     return ret;
+ }
+ 
++/* draw a layered child window on top of the layered surface of its top-level window */
++static void draw_layered_child( HWND child, struct window_surface *surface, const RECT *window_rect,
++                                const RECT *clip )
++{
++    BITMAPINFO info = {{ sizeof(BITMAPINFOHEADER) }};
++    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
++    COLORREF key = CLR_INVALID;
++    DWORD lwa_flags, *bits, pixel, key_pixel = 0;
++    BYTE alpha = 255;
++    RECT rect, dst_rect;
++    HBITMAP bitmap;
++    HDC hdc, hdc_dst;
++    int i, width, height;
++
++    get_window_rect( child, &rect, get_thread_dpi() );
++    OffsetRect( &rect, -window_rect->left, -window_rect->top );
++    if (!intersect_rect( &dst_rect, &rect, clip )) return;
++    width = rect.right - rect.left;
++    height = rect.bottom - rect.top;
++
++    info.bmiHeader.biWidth = width;
++    info.bmiHeader.biHeight = -height;
++    info.bmiHeader.biPlanes = 1;
++    info.bmiHeader.biBitCount = 32;
++    info.bmiHeader.biCompression = BI_RGB;
++    if (!(hdc = NtGdiCreateCompatibleDC( 0 ))) return;
++    if (!(bitmap = NtGdiCreateDIBSection( hdc, NULL, 0, &info, DIB_RGB_COLORS, 0, 0, 0, (void **)&bits )))
++    {
++        NtGdiDeleteObjectApp( hdc );
++        return;
++    }
++    NtGdiSelectBitmap( hdc, bitmap );
++    send_message( child, WM_PRINT, (WPARAM)hdc, PRF_NONCLIENT | PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN );
++
++    if (NtUserGetLayeredWindowAttributes( child, &key, &alpha, &lwa_flags ))
++    {
++        if (!(lwa_flags & LWA_ALPHA)) alpha = 255;
++        if (!(lwa_flags & LWA_COLORKEY)) key = CLR_INVALID;
++    }
++    if (key != CLR_INVALID) key_pixel = (GetRValue( key ) << 16) | (GetGValue( key ) << 8) | GetBValue( key );
++
++    /* GDI leaves the alpha channel at zero: make the child opaque, apart from its colour key */
++    for (i = 0; i < width * height; i++)
++    {
++        pixel = bits[i] & 0xffffff;
++        if (key != CLR_INVALID && pixel == key_pixel) bits[i] = 0;
++        else if (alpha == 255) bits[i] = pixel | 0xff000000;
++        else bits[i] = (alpha << 24) | ((((pixel >> 16) & 0xff) * alpha / 255) << 16) |
++                       ((((pixel >> 8) & 0xff) * alpha / 255) << 8) | ((pixel & 0xff) * alpha / 255);
++    }
++
++    if ((hdc_dst = NtGdiCreateCompatibleDC( 0 )))
++    {
++        window_surface_lock( surface );
++        NtGdiSelectBitmap( hdc_dst, surface->color_bitmap );
++        if (NtGdiAlphaBlend( hdc_dst, dst_rect.left, dst_rect.top, dst_rect.right - dst_rect.left,
++                             dst_rect.bottom - dst_rect.top, hdc, dst_rect.left - rect.left,
++                             dst_rect.top - rect.top, dst_rect.right - dst_rect.left,
++                             dst_rect.bottom - dst_rect.top, *(DWORD *)&blend, 0 ))
++            add_bounds_rect( &surface->bounds, &dst_rect );
++        window_surface_unlock( surface );
++        NtGdiDeleteObjectApp( hdc_dst );
++    }
++
++    NtGdiDeleteObjectApp( hdc );
++    NtGdiDeleteObjectApp( bitmap );
++}
++
++/* Since Windows 8 child windows can be layered too, and the compositor draws them on top of
++ * a top-level window that uses UpdateLayeredWindow. Our layered surface only holds the bitmap
++ * the application passed in, so draw those children on top of it ourselves. */
++static void draw_layered_children( HWND parent, struct window_surface *surface,
++                                   const RECT *window_rect, const RECT *clip )
++{
++    HWND *list;
++    int i;
++
++    if (!(list = list_window_children( parent ))) return;
++    for (i = 0; list[i]; i++) ;
++    while (i--)  /* bottom of the z-order first */
++    {
++        if (!(get_window_long( list[i], GWL_STYLE ) & WS_VISIBLE)) continue;
++        if (get_window_thread( list[i], NULL ) != GetCurrentThreadId()) continue;
++        if (get_window_long( list[i], GWL_EXSTYLE ) & WS_EX_LAYERED)
++            draw_layered_child( list[i], surface, window_rect, clip );
++        else
++            draw_layered_children( list[i], surface, window_rect, clip );
++    }
++    free( list );
++}
++
+ /*****************************************************************************
+  *           UpdateLayeredWindow (win32u.@)
+  */
+@@ -2836,6 +2927,8 @@ BOOL WINAPI NtUserUpdateLayeredWindow( HWND hwnd, HDC hdc_dst, const POINT *pts_
+         NtGdiDeleteObjectApp( hdc );
+         window_surface_unlock( surface );
+ 
++        if (ret) draw_layered_children( hwnd, surface, &new_rects.window, &rect );
++
+         if (!(flags & ULW_COLORKEY)) key = CLR_INVALID;
+         window_surface_set_layered( surface, key, -1, 0xff000000 );
+ 
+-- 
+2.55.0
+
