@@ -46,7 +46,7 @@ PATCHES=(
 	# Upstream pull requests (code only), drop each one once merged:
 	# https://github.com/le-birnes/AdobeWine/pull/3 - Segoe UI from Selawik (Photoshop menu bar hang)
 	"${FILESDIR}"/${P}-pr3-segoe-ui-from-selawik.patch
-	# https://github.com/le-birnes/AdobeWine/pull/4 - D3D12 feature level 12_0 (Photoshop sees no GPU)
+	# https://github.com/le-birnes/AdobeWine/pull/4 - D3D12 feature level 12_0/12_1 (Photoshop and Camera Raw see no GPU)
 	"${FILESDIR}"/${P}-pr4-d3d12-feature-level.patch
 	# https://github.com/le-birnes/AdobeWine/pull/5 - newest installed release, menu icons
 	"${FILESDIR}"/${P}-pr5-newest-release.patch
@@ -94,8 +94,8 @@ pkg_postinst() {
 	elog
 	elog "Adobe's UI needs Segoe UI. Pass the Fonts folder of a Windows installation"
 	elog "you own with --windows-fonts; without it, setup makes Segoe UI from Selawik."
-	elog "Setup also checks the Direct3D 12 feature level and reports 12_0 on GPUs"
-	elog "whose driver offers only 11_x, so Photoshop finds the GPU."
+	elog "Setup also checks the Direct3D 12 feature level and reports 12_0/12_1 on GPUs"
+	elog "whose driver offers only 11_x, so Photoshop and Camera Raw use the GPU."
 	if [[ -n ${REPLACING_VERSIONS} ]]; then
 		elog
 		elog "Upgrading: run 'adobewine setup' once more so existing prefixes get"

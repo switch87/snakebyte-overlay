@@ -269,9 +269,11 @@ upstream (pull requests 3–5) and dropped here once merged:
 - **Segoe UI from Selawik** (`media-fonts/selawik`) when no Windows fonts are
   given. Without a real "Segoe UI" family Photoshop's menu bar stays white and
   the UI hangs at full CPU; a font substitute does not help DirectWrite.
-- **Direct3D 12 feature level 12_0** is reported on GPUs whose Vulkan driver
-  offers only 11_x (e.g. Intel UHD 620 with Mesa); otherwise Photoshop finds
-  no GPU and no VRAM.
+- **Direct3D 12 feature level 12_0 or 12_1** is reported on GPUs whose Vulkan
+  driver offers only 11_x (e.g. Intel UHD 620 with Mesa), 12_1 when the GPU
+  has the rest of it, as on Windows. Otherwise Photoshop finds no GPU and no
+  VRAM, and Camera Raw refuses to edit ("requires GPU acceleration"; it wants
+  12_1 on Intel).
 - `adobewine photoshop` and the menu entries use the **newest installed
   release** (e.g. Photoshop 2025), and menu entries get the app's icon.
 
@@ -347,7 +349,7 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
-| `app-emulation/adobewine` | 0.1.0-r2 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts + fixes offered upstream (PR 3–5); DXVK 3.1.1, vkd3d-proton 3.0.1 |
+| `app-emulation/adobewine` | 0.1.0-r3 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts + fixes offered upstream (PR 3–5); DXVK 3.1.1, vkd3d-proton 3.0.1 |
 | `app-emulation/wine-adobe` | 11.18 | Wine with the AdobeWine patch set | LGPL-2.1+ | slotted; adobewine needs it with USE `gecko mono vulkan wow64` |
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
