@@ -1,0 +1,17 @@
+diff --git a/scripts/setup-prefix.sh b/scripts/setup-prefix.sh
+index dd08d28..11e42fe 100755
+--- a/scripts/setup-prefix.sh
++++ b/scripts/setup-prefix.sh
+@@ -108,6 +108,12 @@ elif ! ls "$WINEPREFIX/drive_c/windows/Fonts/"segoeui.ttf >/dev/null 2>&1; then
+     echo "      or install the Selawik fonts and run setup again." >&2
+   fi
+ fi
++# Prefixes made by app-emulation/adobewine-0.1.0-r1 map Segoe UI to Selawik through GDI
++# FontSubstitutes; with a real Segoe UI those would steer GDI away from it.
++FS='HKLM\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes'
++for w in "" " Light" " Semilight" " Semibold" " Bold"; do
++  wine reg query "$FS" /v "Segoe UI$w" 2>/dev/null | grep -q Selawik && wine reg delete "$FS" /v "Segoe UI$w" /f >/dev/null
++done
+ "$ADOBEWINE_SRC/scripts/register-fonts.sh"
+ wineserver -w
+ echo "prefix ready: $WINEPREFIX ($(wine --version))"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<longdescription lang="en">
+		Scripts from the AdobeWine project that create a per-user Wine prefix for
+		Adobe Creative Cloud apps (DXVK, vkd3d-proton with a D3D12 shim, fonts,
+		registry tweaks) and launch Photoshop, Illustrator, Premiere Pro and
+		friends with app-emulation/wine-adobe. Gentoo installs DXVK, vkd3d-proton,
+		wine-gecko and wine-mono itself, so nothing is downloaded at run time
+		except the Microsoft redistributables winetricks fetches.
+	</longdescription>
+	<upstream>
+		<remote-id type="github">le-birnes/AdobeWine</remote-id>
+	</upstream>
+</pkgmetadata>
