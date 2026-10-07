@@ -243,6 +243,44 @@ over the VPN by itself after it left the home Wi-Fi. A connection that stops
 acknowledging data is dropped after 60 s instead of hanging for many minutes.
 Also included: the upstream TCP keepalive tuning from master (not in 26.04).
 
+### Adobe Creative Cloud apps — `app-emulation/adobewine` and `app-emulation/wine-adobe`
+
+Photoshop, Illustrator, Premiere Pro, Audition and Media Encoder under Wine,
+packaged from [AdobeWine](https://github.com/le-birnes/AdobeWine):
+
+- **`wine-adobe`** (11.18) — Wine with the AdobeWine patch set, installed next
+  to other Wine versions in `/usr/lib/wine-adobe-11.18`.
+- **`adobewine`** (0.1.0) — the `adobewine` command. It creates a per-user
+  prefix in `~/.local/share/adobewine/prefix` (DXVK, vkd3d-proton behind
+  AdobeWine's D3D12 shim, fonts, registry settings), starts the apps and adds
+  them to the menu. DXVK, vkd3d-proton, wine-gecko and wine-mono come from
+  Portage; nothing is downloaded at run time except what winetricks fetches.
+
+```sh
+adobewine setup [--windows-fonts <Fonts folder of your own Windows>]
+adobewine run <Creative Cloud installer>.exe   # sign in, install the apps
+adobewine launchers                            # menu entries
+adobewine photoshop
+```
+
+On top of AdobeWine 0.1.0 these fixes are applied; each is also offered
+upstream (pull requests 3–5) and dropped here once merged:
+
+- **Segoe UI from Selawik** (`media-fonts/selawik`) when no Windows fonts are
+  given. Without a real "Segoe UI" family Photoshop's menu bar stays white and
+  the UI hangs at full CPU; a font substitute does not help DirectWrite.
+- **Direct3D 12 feature level 12_0** is reported on GPUs whose Vulkan driver
+  offers only 11_x (e.g. Intel UHD 620 with Mesa); otherwise Photoshop finds
+  no GPU and no VRAM.
+- `adobewine photoshop` and the menu entries use the **newest installed
+  release** (e.g. Photoshop 2025), and menu entries get the app's icon.
+
+After upgrading, run `adobewine setup` once more so an existing prefix gets the
+fixes. Photoshop needs a lot of memory while it starts: on a machine with 8 GB
+RAM add disk swap (a swapfile in its own btrfs subvolume), or it is killed by
+the OOM killer. A Creative Cloud subscription is required; Adobe does not
+support running its apps under Wine.
+
 ### Touch screen edge rejection — `kde-plasma/kwin` and `kde-plasma/plasma-desktop`
 
 Some touch screens (here a Wacom HID 5412 in a ThinkPad L13 2-in-1) report
@@ -309,6 +347,8 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
+| `app-emulation/adobewine` | 0.1.0-r2 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts + fixes offered upstream (PR 3–5); DXVK 3.1.1, vkd3d-proton 3.0.1 |
+| `app-emulation/wine-adobe` | 11.18 | Wine with the AdobeWine patch set | LGPL-2.1+ | slotted; adobewine needs it with USE `gecko mono vulkan wow64` |
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
@@ -338,6 +378,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
 | `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
+| `media-fonts/selawik` | 1.01 | Microsoft's open, metric-compatible fallback for Segoe UI | OFL-1.1 | used by adobewine when no Windows fonts are given |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
