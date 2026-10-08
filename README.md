@@ -354,6 +354,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
+| `app-text/printcraft-bin` | 0.2.1 | PrintCraft (formerly PdfCraft) PDF reader and editor (Rust) | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
 | `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
@@ -382,13 +383,16 @@ device, e.g. `usermod -aG dialout <user>`.
 | `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-fonts/selawik` | 1.01 | Microsoft's open, metric-compatible fallback for Segoe UI | OFL-1.1 | used by adobewine when no Windows fonts are given |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
+| `media-gfx/designcraft-bin` | 0.2.1 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
 | `media-gfx/photocraft-bin` | 0.3.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
+| `media-gfx/vectorcraft-bin` | 0.4.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/wkhtmltopdf-odoo-bin` | 0.12.6.1_p3 | wkhtmltopdf with patched Qt, for Odoo PDF reports | LGPL-3+ | |
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
+| `media-video/filmcraft-bin` | 0.2.1 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; sound needs ALSA routed to PipeWire (`media-video/pipewire[pipewire-alsa]`) |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
 | `kde-plasma/kwin` | 6.7.5-r101 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |
