@@ -413,6 +413,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
 | `media-gfx/lightcraft-bin` | 0.2.1 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
+| `media-gfx/photocraft` | 0.3.0 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases |
 | `media-gfx/photocraft-bin` | 0.3.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
 | `media-gfx/vectorcraft-bin` | 0.4.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |

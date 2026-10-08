@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="cjk">Embed the Japanese UI and Type-tool fonts from storytold/craft-fonts, like the official releases (otherwise the system's CJK fonts are used)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/photocraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		PhotoCraft is a clean-room reimplementation of a Photoshop-style editor in
+		pure Rust: layers, masks, adjustment layers, layer styles, type, vectors,
+		brushes and PSD/PSB round-tripping, rendered on the GPU (wgpu). Built from
+		source; media-gfx/photocraft-bin installs the upstream release binary instead.
+		Early alpha.
+	</longdescription>
+</pkgmetadata>
