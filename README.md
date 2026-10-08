@@ -307,6 +307,28 @@ then log out and in again. Not part of KDE; dropped again if KWin gains this
 itself. Back to `::gentoo`:
 `emerge --oneshot =kde-plasma/kwin-6.7.5-r1 =kde-plasma/plasma-desktop-6.7.5`.
 
+### The storytold Crafting Apps — `*craft-bin`
+
+PhotoCraft, DesignCraft, VectorCraft, PdfCraft, FilmCraft, CADCraft, DeckCraft, EffectCraft,
+GridCraft, LightCraft and WordCraft from [storytold](https://github.com/storytold) (clean-room
+Rust reimplementations of the Adobe/Microsoft/Autodesk classics), packaged from their official
+Linux x86_64 release tarballs. The binaries link only against glibc (FilmCraft, DeckCraft and
+EffectCraft also ALSA; their `pipewire` USE flag, on by default, requires
+`media-video/pipewire[pipewire-alsa]` so the ALSA default device reaches PipeWire).
+
+New upstream releases are bumped with one script:
+
+```sh
+/var/db/repos/snakebyte/scripts/craft-bump --dry-run     # what is new
+/var/db/repos/snakebyte/scripts/craft-bump [photocraft-bin ...]
+```
+
+For each package with a newer release it copies the newest ebuild, adjusts `MY_PN` when the
+tarball was renamed, creates the Manifest, checks the distfile against the release's
+`SHA256SUMS.txt`, does a test install (a changed tarball layout, such as added or removed font
+licences, stops it there so `LICENSE` can be reviewed) and runs pkgcheck. It commits and
+installs nothing. It also reports when SoundCraft publishes its first Linux release.
+
 ## Installation
 
 With `app-eselect/eselect-repository`:

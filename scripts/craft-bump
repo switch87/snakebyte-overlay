@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Bump the storytold Crafting Apps (-bin) to their newest GitHub release.
+
+Usage: scripts/craft-bump [--dry-run] [package ...]
+       (package = e.g. photocraft-bin or media-gfx/photocraft-bin; default: all)
+
+For each package it asks the GitHub API for the latest release. When no ebuild
+exists for that version yet, it copies the newest ebuild (dropping the -rN
+revision), adjusts MY_PN when the tarball was renamed, creates the Manifest,
+checks the distfile against the release's SHA256SUMS.txt, runs a test install
+(so a changed tarball layout fails here, not on emerge) and pkgcheck.
+Nothing is committed or installed; the script prints the git and emerge steps.
+"""
+import hashlib, json, os, re, subprocess, sys, urllib.request
+from pathlib import Path
+
+OVERLAY = Path(__file__).resolve().parent.parent
+# package -> GitHub repository under storytold
+PACKAGES = {
+    "media-gfx/photocraft-bin": "photocraft",
+    "media-gfx/designcraft-bin": "designcraft",
+    "media-gfx/vectorcraft-bin": "vectorcraft",
+    "media-gfx/cadcraft-bin": "cadcraft",
+    "media-gfx/lightcraft-bin": "lightcraft",
+    "app-text/pdfcraft-bin": "pdfcraft",
+    "app-office/deckcraft-bin": "deckcraft",
+    "app-office/gridcraft-bin": "gridcraft",
+    "app-office/wordcraft-bin": "wordcraft",
+    "media-video/filmcraft-bin": "filmcraft",
+    "media-video/effectcraft-bin": "effectcraft",
+}
+# apps without a package yet: report when they publish a Linux tarball
+WATCH = ["soundcraft"]
+ASSET = re.compile(r"^(?P<name>[a-z]+)-(?P<ver>[0-9][0-9A-Za-z.\-]*)-linux-x86_64\.tar\.gz$")
+
+
+def latest_release(repo):
+    req = urllib.request.Request(f"https://api.github.com/repos/storytold/{repo}/releases/latest",
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "snakebyte-craft-bump"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def linux_asset(release):
+    for a in release.get("assets", []):
+        m = ASSET.match(a["name"])
+        if m:
+            return m["name"], m["ver"], a
+    return None
+
+
+def ebuild_version(path, pn):
+    return path.name[len(pn) + 1:-len(".ebuild")]
+
+
+def gentoo_version(tag_ver):
+    # 0.4.0 stays 0.4.0; 0.5.0-rc.1 -> 0.5.0_rc1
+    return re.sub(r"-rc\.?(\d+)", r"_rc\1", tag_ver)
+
+
+def run(cmd, **kw):
+    kw.setdefault("env", {**os.environ, "NOCOLOR": "true"})
+    return subprocess.run(cmd, check=True, text=True, capture_output=True, **kw)
+
+
+def bump(cat_pn, repo, dry):
+    cat, pn = cat_pn.split("/")
+    pkgdir = OVERLAY / cat / pn
+    rel = latest_release(repo)
+    if rel is None:
+        return f"{cat_pn}: no release"
+    found = linux_asset(rel)
+    if not found:
+        return f"{cat_pn}: {rel['tag_name']} has no linux-x86_64 tarball"
+    name, tag_ver, asset = found
+    ver = gentoo_version(tag_ver)
+    if list(pkgdir.glob(f"{pn}-{ver}.ebuild")) + list(pkgdir.glob(f"{pn}-{ver}-r*.ebuild")):
+        return f"{cat_pn}: up to date ({ver})"
+    if dry:
+        return f"{cat_pn}: NEW {ver} available (dry run)"
+
+    ebuilds = sorted(pkgdir.glob(f"{pn}-*.ebuild"),
+                     key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", ebuild_version(p, pn))])
+    text = ebuilds[-1].read_text()
+    if "MY_PN=" in text:
+        text = re.sub(r"(?m)^MY_PN=.*$", f"MY_PN={name}", text)
+    elif name != pn.removesuffix("-bin"):
+        return f"{cat_pn}: tarball is now called {name}; add MY_PN to the ebuild by hand"
+    new = pkgdir / f"{pn}-{ver}.ebuild"
+    new.write_text(text)
+    try:
+        run(["sudo", "NOCOLOR=true", "ebuild", str(new), "manifest"])
+        distdir = run(["portageq", "distdir"]).stdout.strip()
+        data = Path(distdir, asset["name"]).read_bytes()
+        sums = urllib.request.urlopen(
+            next(a["browser_download_url"] for a in rel["assets"] if a["name"] == "SHA256SUMS.txt"), timeout=30).read().decode()
+        want = next((l.split()[0] for l in sums.splitlines() if l.strip().endswith(asset["name"])), None)
+        got = hashlib.sha256(data).hexdigest()
+        if want != got:
+            raise RuntimeError(f"SHA-256 mismatch for {asset['name']}: release says {want}, file is {got}")
+        run(["sudo", "NOCOLOR=true", "ebuild", str(new), "clean", "install"])
+        run(["sudo", "NOCOLOR=true", "ebuild", str(new), "clean"])
+        check = subprocess.run(["pkgcheck", "scan", "--exit=error", f"{cat}/{pn}"], cwd=OVERLAY, text=True, capture_output=True)
+        if check.returncode != 0:
+            raise RuntimeError("pkgcheck: " + (check.stdout + check.stderr).strip())
+    except (subprocess.CalledProcessError, RuntimeError, StopIteration) as e:
+        out = (getattr(e, "stdout", "") or "") + (getattr(e, "stderr", "") or "")
+        errs = [l for l in out.splitlines() if re.search(r"ERROR|failed|No such file|die", l)]
+        detail = "\n    ".join(errs[-4:]) or out[-400:] or str(e)
+        new.unlink(missing_ok=True)
+        subprocess.run(["sudo", "NOCOLOR=true", "ebuild", str(ebuilds[-1]), "manifest"], capture_output=True)
+        return f"{cat_pn}: FAILED {ver}: {detail.strip()[-400:]}"
+    return f"{cat_pn}: created {new.name} (SHA-256 matches SHA256SUMS.txt, test install ok, pkgcheck clean)"
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    dry = "--dry-run" in sys.argv
+    todo = {k: v for k, v in PACKAGES.items() if not args or k in args or k.split("/")[1] in args}
+    results = [bump(k, v, dry) for k, v in todo.items()]
+    if not args:
+        for repo in WATCH:
+            rel = latest_release(repo)
+            if rel and linux_asset(rel):
+                results.append(f"{repo}: first Linux release {rel['tag_name']} — time to add a -bin package")
+            else:
+                results.append(f"{repo}: no Linux release yet")
+    print("\n".join(results))
+    if any("created" in r for r in results):
+        print("\nNext: review, then `git add -A && git commit` in the overlay and `emerge -uav <package>`.")
+    return 1 if any("FAILED" in r for r in results) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
