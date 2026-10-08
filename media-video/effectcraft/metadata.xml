@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="pipewire">Route ALSA playback to PipeWire (requires <pkg>media-video/pipewire</pkg> with USE=pipewire-alsa)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/effectcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		EffectCraft is a clean-room reimplementation of an After Effects-style compositor in pure Rust. Built from source;
+		media-video/effectcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

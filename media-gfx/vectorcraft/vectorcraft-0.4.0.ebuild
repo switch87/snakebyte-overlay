@@ -3,7 +3,7 @@
 
 EAPI=8
 
-# craft-fonts commit the upstream release embeds (CRAFT_FONTS_REF in .github/workflows/release.yml)
+# craft-fonts commit the upstream release embeds (release workflow)
 CRAFT_FONTS_COMMIT="abb83316d96aa59c1cf64784289e378fe9fa5695"
 RUST_MIN_VER="1.95.0"
 
@@ -12,10 +12,10 @@ CRATES="
 
 inherit cargo desktop xdg
 
-DESCRIPTION="Open-source layered image editor with PSD support, written in Rust"
-HOMEPAGE="https://getartcraft.com/apps/photocraft https://github.com/storytold/photocraft"
+DESCRIPTION="Open-source vector illustration editor (SVG, PDF), written in Rust"
+HOMEPAGE="https://getartcraft.com/apps/vectorcraft https://github.com/storytold/vectorcraft"
 SRC_URI="
-	https://github.com/storytold/photocraft/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
+	https://github.com/storytold/vectorcraft/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
 	cjk? (
 		https://github.com/storytold/craft-fonts/archive/${CRAFT_FONTS_COMMIT}.tar.gz
 			-> craft-fonts-${CRAFT_FONTS_COMMIT:0:12}.tar.gz
@@ -26,17 +26,16 @@ SRC_URI="
 LICENSE="|| ( MIT Apache-2.0 ) cjk? ( OFL-1.1 )"
 # Dependent crate licenses
 LICENSE+="
-	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 BSD Boost-1.0 IJG
-	ISC MIT MPL-2.0 UoI-NCSA OFL-1.1 UbuntuFontLicense-1.0 Unicode-3.0
-	ZLIB
+	Apache-2.0 BSD-2 BSD Boost-1.0 IJG ISC MIT OFL-1.1
+	UbuntuFontLicense-1.0 Unicode-3.0 ZLIB
 "
 SLOT="0"
 KEYWORDS="~amd64"
-IUSE="avif +cjk"
+IUSE="+cjk"
 
 # winit/wgpu dlopen() the windowing and GPU libraries at runtime.
 RDEPEND="
-	!media-gfx/photocraft-bin
+	!media-gfx/vectorcraft-bin
 	media-libs/libglvnd
 	media-libs/vulkan-loader
 	sys-apps/dbus
@@ -47,36 +46,32 @@ RDEPEND="
 	x11-libs/libxkbcommon[X]
 	dev-libs/wayland
 "
-DEPEND="${RDEPEND}"
 BDEPEND="virtual/pkgconfig"
 
-QA_FLAGS_IGNORED="usr/bin/photocraft usr/bin/photocraft-cli"
+QA_FLAGS_IGNORED="usr/bin/vectorcraft usr/bin/vectorcraft-cli"
 
 src_configure() {
-	# Embed the CJK fonts like the official releases do; without them the
-	# app falls back to the system's CJK fonts.
+	# Embed the fonts like the official releases do; without them the app
+	# falls back to the system fonts.
 	use cjk && export CRAFT_FONTS_DIR="${WORKDIR}/craft-fonts-${CRAFT_FONTS_COMMIT}" CRAFT_FONTS_REQUIRED=1
-	local myfeatures=()
-	# AVIF export (ravif/rav1e, pure Rust); off upstream
-	use avif && myfeatures+=( photocraft-codecs/avif )
 	cargo_src_configure
 }
 
 src_compile() {
-	cargo_src_compile -p photocraft -p photocraft-cli
+	cargo_src_compile -p vectorcraft -p vectorcraft-cli
 }
 
 src_install() {
-	dobin "$(cargo_target_dir)"/{photocraft,photocraft-cli}
+	dobin "$(cargo_target_dir)"/{vectorcraft,vectorcraft-cli}
 
-	local app=ai.storyteller.photocraft
-	domenu packaging/linux/${app}.desktop
+	local id=ai.storyteller.vectorcraft
+	domenu packaging/linux/${id}.desktop
 	insinto /usr/share/mime/packages
-	newins packaging/linux/${app}.mime.xml ${app}.xml
+	newins packaging/linux/${id}.mime.xml ${id}.xml
 	sed -e "s/@VERSION@/${PV}/g" -e "s/@DATE@/$(date -u +%F)/g" \
-		packaging/linux/${app}.metainfo.xml.in > "${T}"/${app}.metainfo.xml || die
+		packaging/linux/${id}.metainfo.xml.in > "${T}"/${id}.metainfo.xml || die
 	insinto /usr/share/metainfo
-	doins "${T}"/${app}.metainfo.xml
+	doins "${T}"/${id}.metainfo.xml
 	insinto /usr/share/icons
 	doins -r assets/app-icon/hicolor
 

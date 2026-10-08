@@ -7,6 +7,7 @@
 	</maintainer>
 	<use>
 		<flag name="cjk">Embed the Japanese UI and Type-tool fonts from storytold/craft-fonts, like the official releases (otherwise the system's CJK fonts are used)</flag>
+		<flag name="avif">Export AVIF images (ravif/rav1e, pure Rust); off in the upstream release</flag>
 	</use>
 	<upstream>
 		<remote-id type="github">storytold/photocraft</remote-id>

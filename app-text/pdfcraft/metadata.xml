@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="mcp">Build the MCP server for AI agents into printcraft-cli</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/pdfcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		PdfCraft is a clean-room reimplementation of an Acrobat-style PDF application in pure Rust (0.2.1 was released as PrintCraft). Built from source;
+		app-text/pdfcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

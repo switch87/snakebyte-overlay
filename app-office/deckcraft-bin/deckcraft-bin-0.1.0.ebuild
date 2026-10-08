@@ -21,6 +21,7 @@ RESTRICT="bindist mirror strip"
 # Sound goes through ALSA's "default" device. On a PipeWire system that device only exists
 # when PipeWire's ALSA plugin config is installed into /etc/alsa/conf.d (USE=pipewire-alsa).
 RDEPEND="
+	!app-office/deckcraft
 	media-libs/alsa-lib
 	pipewire? ( media-video/pipewire[pipewire-alsa] )
 	media-libs/libglvnd

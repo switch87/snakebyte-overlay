@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Bump the storytold Crafting Apps (-bin) to their newest GitHub release.
 
-Usage: scripts/craft-bump [--dry-run] [package ...]
-       (package = e.g. photocraft-bin or media-gfx/photocraft-bin; default: all)
+Usage: scripts/craft-bump [--dry-run] [--no-source] [package ...]
+       (package = e.g. photocraft-bin, photocraft or media-gfx/photocraft; default: all)
 
 For each package it asks the GitHub API for the latest release. When no ebuild
 exists for that version yet, it copies the newest ebuild (dropping the -rN
 revision), adjusts MY_PN when the tarball was renamed, creates the Manifest,
 checks the distfile against the release's SHA256SUMS.txt, runs a test install
 (so a changed tarball layout fails here, not on emerge) and pkgcheck.
+For the source packages next to them it downloads the new tag, regenerates the
+crate tarball with pycargoebuild (uploaded to the overlay's 'distfiles' release),
+updates the craft-fonts commit from the release workflow, and does a full test build.
 Nothing is committed or installed; the script prints the git and emerge steps.
 """
 import hashlib, json, os, re, subprocess, sys, urllib.request
@@ -118,11 +121,82 @@ def bump(cat_pn, repo, dry):
     return f"{cat_pn}: created {new.name} (SHA-256 matches SHA256SUMS.txt, test install ok, pkgcheck clean)"
 
 
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "craft-bump"
+FONTS_REF = re.compile(r"storytold/craft-fonts\s*\n\s*ref:\s*([0-9a-f]{40})|CRAFT_FONTS_REF:\s*([0-9a-f]{40})")
+
+
+def bump_source(cat_pn, repo, dry):
+    """Source package next to the -bin: new tag -> new crate tarball (uploaded to the
+    overlay's 'distfiles' release), Manifest, pkgcheck and a full test build."""
+    cat, pn = cat_pn.split("/")
+    pkgdir = OVERLAY / cat / pn
+    rel = latest_release(repo)
+    if rel is None:
+        return f"{cat_pn}: no release"
+    tag = rel["tag_name"]
+    ver = gentoo_version(tag.removeprefix("v"))
+    if list(pkgdir.glob(f"{pn}-{ver}.ebuild")) + list(pkgdir.glob(f"{pn}-{ver}-r*.ebuild")):
+        return f"{cat_pn}: up to date ({ver})"
+    if dry:
+        return f"{cat_pn}: NEW {ver} available (dry run)"
+
+    ebuilds = sorted(pkgdir.glob(f"{pn}-*.ebuild"),
+                     key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", ebuild_version(p, pn))])
+    old = ebuilds[-1]
+    text = old.read_text()
+    work = CACHE / f"{pn}-{ver}"
+    new = pkgdir / f"{pn}-{ver}.ebuild"
+    try:
+        work.mkdir(parents=True, exist_ok=True)
+        tarball = work / "src.tar.gz"
+        urllib.request.urlretrieve(f"https://github.com/storytold/{repo}/archive/refs/tags/{tag}.tar.gz", tarball)
+        run(["tar", "-xzf", str(tarball), "-C", str(work)])
+        src = work / f"{repo}-{tag.removeprefix('v')}"
+        apps = sorted(p.name for p in (src / "apps").iterdir() if not re.search(r"-(cli|web)$", p.name))
+        old_app = re.search(r"cargo_src_compile -p (\S+)", text)[1]
+        if old_app not in apps:
+            raise RuntimeError(f"the app crate is now {apps}, not {old_app}; adjust the ebuild by hand")
+        if "CRAFT_FONTS_COMMIT=" in text:
+            wf = "".join(p.read_text() for p in (src / ".github" / "workflows").glob("release*.yml"))
+            m = FONTS_REF.search(wf)
+            if not m:
+                raise RuntimeError("no craft-fonts commit found in the release workflow")
+            text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2]}"', text)
+        new.write_text(text)
+        crates = work / f"{pn}-{ver}-crates.tar.xz"
+        run(["pycargoebuild", "-c", "-f", "-i", str(new), "-d", str(CACHE / "crates"),
+             "--crate-tarball-path", str(crates), str(src / "apps" / old_app)])
+        run(["gh", "release", "upload", "distfiles", "-R", "switch87/snakebyte-overlay", str(crates), "--clobber"])
+        run(["sudo", "NOCOLOR=true", "ebuild", str(new), "manifest"])
+        check = subprocess.run(["pkgcheck", "scan", "--exit=error", cat_pn], cwd=OVERLAY, text=True, capture_output=True)
+        if check.returncode != 0:
+            raise RuntimeError("pkgcheck: " + (check.stdout + check.stderr).strip())
+        build = run(["sudo", "NOCOLOR=true", "ebuild", str(new), "clean", "install"])
+        need = re.findall(r'requires RUST_MIN_VER="([0-9.]+)"', build.stdout + build.stderr)
+        if need:  # a dependency raised the minimum Rust version
+            v = max(need, key=lambda s: [int(x) for x in s.split(".")])
+            new.write_text(re.sub(r'(?m)^RUST_MIN_VER=".*"$', f'RUST_MIN_VER="{v}.0"', new.read_text()))
+            run(["sudo", "NOCOLOR=true", "ebuild", str(new), "manifest"])
+        run(["sudo", "NOCOLOR=true", "ebuild", str(new), "clean"])
+    except (subprocess.CalledProcessError, RuntimeError, OSError, TypeError) as e:
+        out = (getattr(e, "stdout", "") or "") + (getattr(e, "stderr", "") or "")
+        errs = [l for l in out.splitlines() if re.search(r"ERROR|error|failed|No such file|die", l)]
+        detail = "\n    ".join(errs[-4:]) or out[-400:] or str(e)
+        new.unlink(missing_ok=True)
+        subprocess.run(["sudo", "NOCOLOR=true", "ebuild", str(old), "manifest"], capture_output=True)
+        return f"{cat_pn}: FAILED {ver}: {detail.strip()[-400:]}"
+    return f"{cat_pn}: created {new.name} (crate tarball uploaded, test build ok, pkgcheck clean)"
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     dry = "--dry-run" in sys.argv
     todo = {k: v for k, v in PACKAGES.items() if not args or k in args or k.split("/")[1] in args}
     results = [bump(k, v, dry) for k, v in todo.items()]
+    if "--no-source" not in sys.argv:
+        src = {k.removesuffix("-bin"): v for k, v in PACKAGES.items()}
+        todo = {k: v for k, v in src.items() if (OVERLAY / k).is_dir() and (not args or k in args or k.split("/")[1] in args)}
+        results += [bump_source(k, v, dry) for k, v in todo.items()]
     if not args:
         for repo in WATCH:
             rel = latest_release(repo)

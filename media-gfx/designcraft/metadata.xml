@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/designcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		DesignCraft is a clean-room reimplementation of an InDesign-style page layout application in pure Rust. Built from source;
+		media-gfx/designcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

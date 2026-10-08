@@ -3,8 +3,8 @@
 
 EAPI=8
 
-# craft-fonts commit the upstream release embeds (CRAFT_FONTS_REF in .github/workflows/release.yml)
-CRAFT_FONTS_COMMIT="abb83316d96aa59c1cf64784289e378fe9fa5695"
+# craft-fonts commit the upstream release embeds (release workflow)
+CRAFT_FONTS_COMMIT="43913056ce82a3fdad0ef69f6b88d1dc922a8104"
 RUST_MIN_VER="1.95.0"
 
 CRATES="
@@ -12,10 +12,10 @@ CRATES="
 
 inherit cargo desktop xdg
 
-DESCRIPTION="Open-source layered image editor with PSD support, written in Rust"
-HOMEPAGE="https://getartcraft.com/apps/photocraft https://github.com/storytold/photocraft"
+DESCRIPTION="Open-source presentation and slide show application, written in Rust"
+HOMEPAGE="https://getartcraft.com/apps/deckcraft https://github.com/storytold/deckcraft"
 SRC_URI="
-	https://github.com/storytold/photocraft/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
+	https://github.com/storytold/deckcraft/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
 	cjk? (
 		https://github.com/storytold/craft-fonts/archive/${CRAFT_FONTS_COMMIT}.tar.gz
 			-> craft-fonts-${CRAFT_FONTS_COMMIT:0:12}.tar.gz
@@ -26,17 +26,20 @@ SRC_URI="
 LICENSE="|| ( MIT Apache-2.0 ) cjk? ( OFL-1.1 )"
 # Dependent crate licenses
 LICENSE+="
-	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 BSD Boost-1.0 IJG
-	ISC MIT MPL-2.0 UoI-NCSA OFL-1.1 UbuntuFontLicense-1.0 Unicode-3.0
-	ZLIB
+	Apache-2.0 BSD-2 BSD Boost-1.0 ISC MIT MPL-2.0 OFL-1.1
+	UbuntuFontLicense-1.0 Unicode-3.0 ZLIB
 "
 SLOT="0"
 KEYWORDS="~amd64"
-IUSE="avif +cjk"
+IUSE="+cjk +pipewire"
 
 # winit/wgpu dlopen() the windowing and GPU libraries at runtime.
+# Sound goes through ALSA's "default" device; on a PipeWire system that needs
+# PipeWire's ALSA config in /etc/alsa/conf.d (USE=pipewire-alsa).
 RDEPEND="
-	!media-gfx/photocraft-bin
+	!app-office/deckcraft-bin
+	media-libs/alsa-lib
+	pipewire? ( media-video/pipewire[pipewire-alsa] )
 	media-libs/libglvnd
 	media-libs/vulkan-loader
 	sys-apps/dbus
@@ -47,36 +50,35 @@ RDEPEND="
 	x11-libs/libxkbcommon[X]
 	dev-libs/wayland
 "
-DEPEND="${RDEPEND}"
+DEPEND="
+	media-libs/alsa-lib
+"
 BDEPEND="virtual/pkgconfig"
 
-QA_FLAGS_IGNORED="usr/bin/photocraft usr/bin/photocraft-cli"
+QA_FLAGS_IGNORED="usr/bin/deckcraft usr/bin/deckcraft-cli"
 
 src_configure() {
-	# Embed the CJK fonts like the official releases do; without them the
-	# app falls back to the system's CJK fonts.
+	# Embed the fonts like the official releases do; without them the app
+	# falls back to the system fonts.
 	use cjk && export CRAFT_FONTS_DIR="${WORKDIR}/craft-fonts-${CRAFT_FONTS_COMMIT}" CRAFT_FONTS_REQUIRED=1
-	local myfeatures=()
-	# AVIF export (ravif/rav1e, pure Rust); off upstream
-	use avif && myfeatures+=( photocraft-codecs/avif )
 	cargo_src_configure
 }
 
 src_compile() {
-	cargo_src_compile -p photocraft -p photocraft-cli
+	cargo_src_compile -p deckcraft -p deckcraft-cli
 }
 
 src_install() {
-	dobin "$(cargo_target_dir)"/{photocraft,photocraft-cli}
+	dobin "$(cargo_target_dir)"/{deckcraft,deckcraft-cli}
 
-	local app=ai.storyteller.photocraft
-	domenu packaging/linux/${app}.desktop
+	local id=ai.storyteller.deckcraft
+	domenu packaging/linux/${id}.desktop
 	insinto /usr/share/mime/packages
-	newins packaging/linux/${app}.mime.xml ${app}.xml
+	newins packaging/linux/${id}.mime.xml ${id}.xml
 	sed -e "s/@VERSION@/${PV}/g" -e "s/@DATE@/$(date -u +%F)/g" \
-		packaging/linux/${app}.metainfo.xml.in > "${T}"/${app}.metainfo.xml || die
+		packaging/linux/${id}.metainfo.xml.in > "${T}"/${id}.metainfo.xml || die
 	insinto /usr/share/metainfo
-	doins "${T}"/${app}.metainfo.xml
+	doins "${T}"/${id}.metainfo.xml
 	insinto /usr/share/icons
 	doins -r assets/app-icon/hicolor
 

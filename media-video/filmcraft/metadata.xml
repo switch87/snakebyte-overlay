@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="pipewire">Route ALSA playback to PipeWire (requires <pkg>media-video/pipewire</pkg> with USE=pipewire-alsa)</flag>
+		<flag name="whisper">Speech-to-text transcription with Whisper on the CPU (candle), downloading the speech models over HTTPS; off in the upstream release</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/filmcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		FilmCraft is a clean-room reimplementation of a Premiere-style video editor in pure Rust. Built from source;
+		media-video/filmcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

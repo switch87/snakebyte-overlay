@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="cjk">Embed the fonts from storytold/craft-fonts like the official releases (otherwise the system fonts are used)</flag>
+		<flag name="pipewire">Route ALSA playback to PipeWire (requires <pkg>media-video/pipewire</pkg> with USE=pipewire-alsa)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/deckcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		DeckCraft is a clean-room reimplementation of a PowerPoint-style presentation application in pure Rust. Built from source;
+		app-office/deckcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

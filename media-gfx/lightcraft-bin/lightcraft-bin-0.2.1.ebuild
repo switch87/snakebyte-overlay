@@ -18,6 +18,7 @@ RESTRICT="bindist mirror strip"
 # The binary links only against glibc; the rest is dlopen()ed at runtime
 # (wgpu/winit): Vulkan or EGL, Wayland or X11, xkbcommon, D-Bus.
 RDEPEND="
+	!media-gfx/lightcraft
 	media-libs/libglvnd
 	media-libs/vulkan-loader
 	sys-apps/dbus

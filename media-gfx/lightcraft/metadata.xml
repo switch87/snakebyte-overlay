@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<use>
+		<flag name="avif">Export AVIF images (ravif/rav1e, pure Rust)</flag>
+		<flag name="jpegxl">Read JPEG XL images (jxl-oxide, pure Rust)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">storytold/lightcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		LightCraft is a clean-room reimplementation of a Lightroom-style photo organiser and raw developer in pure Rust. Built from source;
+		media-gfx/lightcraft-bin installs the upstream release binary instead. Early alpha.
+	</longdescription>
+</pkgmetadata>

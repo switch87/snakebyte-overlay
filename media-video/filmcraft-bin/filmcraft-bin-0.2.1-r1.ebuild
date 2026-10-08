@@ -22,6 +22,7 @@ RESTRICT="bindist mirror strip"
 # when PipeWire's ALSA plugin config is installed into /etc/alsa/conf.d (USE=pipewire-alsa);
 # without it playback fails with "Unknown PCM default".
 RDEPEND="
+	!media-video/filmcraft
 	media-libs/alsa-lib
 	pipewire? ( media-video/pipewire[pipewire-alsa] )
 	media-libs/libglvnd
