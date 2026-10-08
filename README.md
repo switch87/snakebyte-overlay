@@ -432,8 +432,8 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/photocraft` | 0.3.0 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
 | `media-gfx/photocraft-bin` | 0.3.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
-| `media-gfx/vectorcraft` | 0.4.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
-| `media-gfx/vectorcraft-bin` | 0.4.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `media-gfx/vectorcraft` | 0.5.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
+| `media-gfx/vectorcraft-bin` | 0.5.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/wkhtmltopdf-odoo-bin` | 0.12.6.1_p3 | wkhtmltopdf with patched Qt, for Odoo PDF reports | LGPL-3+ | |
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
