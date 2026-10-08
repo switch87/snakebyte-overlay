@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/photocraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		PhotoCraft is a clean-room reimplementation of a Photoshop-style editor in
+		pure Rust: layers, masks, adjustment layers, layer styles, type, vectors,
+		brushes and PSD/PSB round-tripping, rendered on the GPU (Vulkan). Installed
+		from the upstream Linux tarball; the binary only links against glibc and
+		loads the graphics libraries at runtime. Early alpha.
+	</longdescription>
+</pkgmetadata>
