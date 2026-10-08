@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/gridcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		GridCraft is a clean-room reimplementation of an Excel-style spreadsheet in pure Rust: calculate, analyse and chart data in workbooks.
+		Installed from the upstream Linux tarball; the binary only links against
+		glibc and loads the graphics libraries at runtime. Early alpha.
+	</longdescription>
+</pkgmetadata>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/wordcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		WordCraft is a clean-room reimplementation of a Word-style word processor in pure Rust: write and design documents, open and save Word files.
+		Installed from the upstream Linux tarball; the binary only links against
+		glibc and loads the graphics libraries at runtime. Early alpha.
+	</longdescription>
+</pkgmetadata>

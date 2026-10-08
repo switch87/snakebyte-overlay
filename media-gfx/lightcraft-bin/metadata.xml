@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/lightcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		LightCraft is a clean-room reimplementation of a Lightroom-style photo organiser and non-destructive raw developer in pure Rust.
+		Installed from the upstream Linux tarball; the binary only links against
+		glibc and loads the graphics libraries at runtime. Early alpha.
+	</longdescription>
+</pkgmetadata>
