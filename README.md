@@ -206,6 +206,25 @@ also keeps systemd-networkd from deleting the rule. After installing, run
 Full explanation, diagnosis, configuration and a non-Gentoo version:
 [docs/tailscale-lan-route.md](docs/tailscale-lan-route.md).
 
+### QMapShack with surfaces and way types — `sci-geosciences/qmapshack`
+
+`1.21.1-r100` is the `::gentoo` ebuild plus a patch set that shows, for every track,
+the share of paved / semi-paved / unpaved / unknown surface and of the way types
+(path, track, road, …) in the track's Info tab, Komoot-style, and can colour a
+track by surface or way type (Style tab). The data comes from a *surface
+database* built from the same OpenStreetMap extract (`.osm.pbf`, e.g. from
+Geofabrik) as a Routino database: *Tool → Create Surface Database* in QMapShack,
+or from the command line:
+
+```sh
+qms_surfacedb --name Belgium belgium-latest.osm.pbf ~/QMapShackData/Surface/Belgium.surface.sqlite
+```
+
+Databases live in `Surface/` next to the first Routino directory unless another
+directory is chosen in the tool. No new library is needed (own PBF reader); the
+patches add Qt Concurrent and, with `USE=test`, QtTest unit tests. Offered
+upstream (Maproom/qmapshack); the revision is dropped once a release has it.
+
 ### KDE Connect with location sharing and remote connect — `kde-misc/kdeconnect`
 
 The `::gentoo` ebuild of KDE Connect with an extra **geolocation plugin**
@@ -443,6 +462,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-video/filmcraft-bin` | 0.2.1-r1 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
 | `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
+| `sci-geosciences/qmapshack` | 1.21.1-r100 | QMapShack with surface and way-type analysis of tracks (surface database from OSM extracts, `qms_surfacedb`) | GPL-3+ | `::gentoo` ebuild + 3 patches; test fixture in `files/`; dropped once upstream has it |
 | `kde-plasma/kwin` | 6.7.5-r101 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |
 | `kde-plasma/plasma-desktop` | 6.7.5-r101 | Plasma desktop with the edge rejection setting in the Touchscreen KCM | GPL-2+ | `::gentoo` ebuild + patch; needs kwin-6.7.5-r101 |
 | `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |

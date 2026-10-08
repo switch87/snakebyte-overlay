@@ -1,0 +1,4693 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gert Pellin <gert@pellin.be>
+Date: Thu, 8 Oct 2026 20:06:30 +0200
+Subject: [PATCH 1/3] Add surface database and surface classification of OSM
+ ways
+
+A surface database is a SQLite file with the highways of an OpenStreetMap
+extract (.osm.pbf), split into chunks of up to 16 segments and indexed
+with an R*Tree. It is built by CSurfaceDbBuilder, which reads the extract
+with a small built-in PBF reader (zlib blobs, dense nodes, ways), so no
+new library is needed.
+
+CSurface classifies a way's highway/surface/tracktype/footway tags into a
+surface class (paved, semi-paved, unpaved, unknown), a detailed surface
+and a way type. CSurfaceDb looks up the way at a position as the majority
+of the ways sampled every ~10 m in its ~20 m cell, with the nearest way
+within 25 m as fallback. CSurfaceAnalyzer samples a track every 20 m,
+smooths single-sample blips at crossings and sums the lengths.
+
+The command line tool qms_surfacedb builds a database without the GUI.
+
+Unit tests (BUILD_TESTING=ON, ctest) check the classification and the
+cell lookup case by case against the reference implementation they were
+ported from, the PBF reader and builder on a small fixture, the analysis
+on synthetic data and, if the data is present, a real track against the
+reference's numbers.
+---
+ CMakeLists.txt                                |   7 +
+ src/qmapshack/CMakeLists.txt                  |   7 +
+ src/qmapshack/gis/trk/surface/CPbfReader.cpp  | 456 +++++++++
+ src/qmapshack/gis/trk/surface/CPbfReader.h    |  99 ++
+ src/qmapshack/gis/trk/surface/CSurface.cpp    | 247 +++++
+ src/qmapshack/gis/trk/surface/CSurface.h      | 127 +++
+ .../gis/trk/surface/CSurfaceAnalyzer.cpp      | 102 ++
+ .../gis/trk/surface/CSurfaceAnalyzer.h        |  72 ++
+ src/qmapshack/gis/trk/surface/CSurfaceDb.cpp  | 325 ++++++
+ src/qmapshack/gis/trk/surface/CSurfaceDb.h    | 143 +++
+ .../gis/trk/surface/CSurfaceDbBuilder.cpp     | 332 ++++++
+ .../gis/trk/surface/CSurfaceDbBuilder.h       |  74 ++
+ .../gis/trk/surface/test/CMakeLists.txt       |  19 +
+ .../trk/surface/test/data/classify_cases.tsv  | 960 ++++++++++++++++++
+ .../trk/surface/test/data/fixture_cells.tsv   | 377 +++++++
+ .../surface/test/data/gen_classify_cases.py   |  26 +
+ .../gis/trk/surface/test/data/make_fixture.py |  76 ++
+ .../gis/trk/surface/test/test_CSurface.cpp    | 167 +++
+ .../surface/test/test_CSurfaceAnalyzer.cpp    | 185 ++++
+ .../gis/trk/surface/test/test_CSurfaceDb.cpp  | 404 ++++++++
+ .../trk/surface/test/test_SurfaceDurbuy.cpp   | 158 +++
+ src/qms_surfacedb/CMakeLists.txt              |  19 +
+ src/qms_surfacedb/main.cpp                    |  79 ++
+ 23 files changed, 4461 insertions(+)
+ create mode 100644 src/qmapshack/gis/trk/surface/CPbfReader.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CPbfReader.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurface.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurface.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDb.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
+ create mode 100644 src/qmapshack/gis/trk/surface/test/CMakeLists.txt
+ create mode 100644 src/qmapshack/gis/trk/surface/test/data/classify_cases.tsv
+ create mode 100644 src/qmapshack/gis/trk/surface/test/data/fixture_cells.tsv
+ create mode 100644 src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
+ create mode 100644 src/qmapshack/gis/trk/surface/test/data/make_fixture.py
+ create mode 100644 src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
+ create mode 100644 src/qms_surfacedb/CMakeLists.txt
+ create mode 100644 src/qms_surfacedb/main.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6062955..ba245e4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -71,6 +71,7 @@ option(BUILD_FOR_LOCAL_SYSTEM "Build for local system ONLY (resulting binary mig
+ # Off by default on purpose: only a build that is deliberately refreshing the catalogs may run
+ # lupdate and rewrite the tracked .ts files.
+ option(UPDATE_TRANSLATIONS "Update translation files" OFF)
++option(BUILD_TESTING "Build the unit tests (run them with ctest)" OFF)
+ option(UPDATE_TRANSLATIONS_PURGE_OBSOLETE "Remove obsolete translations" OFF)
+ 
+ 
+@@ -217,6 +218,11 @@ if(USE_QT6DBus)
+     find_package(Qt6 REQUIRED COMPONENTS DBus)
+ endif()
+ 
++if(BUILD_TESTING)
++    find_package(Qt6 REQUIRED COMPONENTS Test)
++    enable_testing()
++endif()
++
+ # Everything included. Let's finetune the mess a bit more
+ 
+ if(APPLE)
+@@ -301,6 +307,7 @@ add_subdirectory(src/common/svgticon)
+ 
+ if(BUILD_QMAPSHACK)
+ add_subdirectory(src/qmapshack)
++add_subdirectory(src/qms_surfacedb)
+ endif(BUILD_QMAPSHACK)
+ 
+ if(BUILD_QMAPTOOL)
+diff --git a/src/qmapshack/CMakeLists.txt b/src/qmapshack/CMakeLists.txt
+index 0e4605f..a384a7d 100644
+--- a/src/qmapshack/CMakeLists.txt
++++ b/src/qmapshack/CMakeLists.txt
+@@ -1106,3 +1106,10 @@ if(WIN32)
+     )
+     install(SCRIPT ${deploy_script_${APPLICATION_NAME}})
+ endif()
++
++###############################################################################################
++# Unit tests
++###############################################################################################
++if(BUILD_TESTING)
++    add_subdirectory(gis/trk/surface/test)
++endif()
+diff --git a/src/qmapshack/gis/trk/surface/CPbfReader.cpp b/src/qmapshack/gis/trk/surface/CPbfReader.cpp
+new file mode 100644
+index 0000000..9557e9b
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CPbfReader.cpp
+@@ -0,0 +1,456 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CPbfReader.h"
++
++#include <QtEndian>
++#include <stdexcept>
++
++namespace {
++// The few protobuf primitives the OSM PBF format needs.
++class CProtoBuf {
++ public:
++  CProtoBuf(const char* data, qsizetype size) : p(reinterpret_cast<const uchar*>(data)), end(p + size) {}
++  explicit CProtoBuf(QByteArrayView view) : CProtoBuf(view.data(), view.size()) {}
++
++  bool atEnd() const { return p >= end; }
++
++  quint64 varint() {
++    quint64 val = 0;
++    for (int shift = 0; shift < 64; shift += 7) {
++      if (p >= end) {
++        throw std::runtime_error("truncated varint");
++      }
++      const uchar b = *p++;
++      val |= quint64(b & 0x7F) << shift;
++      if ((b & 0x80) == 0) {
++        return val;
++      }
++    }
++    throw std::runtime_error("varint too long");
++  }
++
++  qint64 svarint() {
++    const quint64 v = varint();
++    return qint64(v >> 1) ^ -qint64(v & 1);
++  }
++
++  /// read the next field key, false at the end of the message
++  bool next(quint32& field, quint32& wire) {
++    if (atEnd()) {
++      return false;
++    }
++    const quint64 key = varint();
++    field = quint32(key >> 3);
++    wire = quint32(key & 0x07);
++    return true;
++  }
++
++  QByteArrayView bytes() {
++    const quint64 len = varint();
++    if (len > quint64(end - p)) {
++      throw std::runtime_error("truncated field");
++    }
++    QByteArrayView view(reinterpret_cast<const char*>(p), qsizetype(len));
++    p += len;
++    return view;
++  }
++
++  void skip(quint32 wire) {
++    switch (wire) {
++      case 0:
++        varint();
++        break;
++      case 1:
++        advance(8);
++        break;
++      case 2:
++        bytes();
++        break;
++      case 5:
++        advance(4);
++        break;
++      default:
++        throw std::runtime_error("unsupported wire type");
++    }
++  }
++
++ private:
++  void advance(qsizetype n) {
++    if (n > end - p) {
++      throw std::runtime_error("truncated field");
++    }
++    p += n;
++  }
++
++  const uchar* p;
++  const uchar* end;
++};
++
++// repeated scalar fields may come packed (wire type 2) or one by one (wire type 0)
++template <typename T, bool zigzag>
++void readRepeated(CProtoBuf& buf, quint32 wire, QVector<T>& out) {
++  if (wire == 2) {
++    CProtoBuf packed(buf.bytes());
++    while (!packed.atEnd()) {
++      out << T(zigzag ? packed.svarint() : qint64(packed.varint()));
++    }
++  } else if (wire == 0) {
++    out << T(zigzag ? buf.svarint() : qint64(buf.varint()));
++  } else {
++    buf.skip(wire);
++  }
++}
++
++struct block_params_t {
++  qint64 granularity = 100;
++  qint64 latOffset = 0;
++  qint64 lonOffset = 0;
++};
++
++inline qint32 toE7(qint64 offset, qint64 granularity, qint64 value) {
++  // nanodegrees to 1e-7 degrees, truncating like libosmium
++  return qint32((offset + granularity * value) / 100);
++}
++
++void parseNode(QByteArrayView data, const block_params_t& params, const CPbfReader::fNode& onNode) {
++  CProtoBuf buf(data);
++  quint32 field, wire;
++  qint64 id = 0, lat = 0, lon = 0;
++  while (buf.next(field, wire)) {
++    if (field == 1 && wire == 0) {
++      id = buf.svarint();
++    } else if (field == 8 && wire == 0) {
++      lat = buf.svarint();
++    } else if (field == 9 && wire == 0) {
++      lon = buf.svarint();
++    } else {
++      buf.skip(wire);
++    }
++  }
++  onNode(id, toE7(params.latOffset, params.granularity, lat), toE7(params.lonOffset, params.granularity, lon));
++}
++
++void parseDenseNodes(QByteArrayView data, const block_params_t& params, const CPbfReader::fNode& onNode) {
++  CProtoBuf buf(data);
++  quint32 field, wire;
++  QVector<qint64> ids, lats, lons;
++  while (buf.next(field, wire)) {
++    if (field == 1) {
++      readRepeated<qint64, true>(buf, wire, ids);
++    } else if (field == 8) {
++      readRepeated<qint64, true>(buf, wire, lats);
++    } else if (field == 9) {
++      readRepeated<qint64, true>(buf, wire, lons);
++    } else {
++      buf.skip(wire);
++    }
++  }
++  if (ids.size() != lats.size() || ids.size() != lons.size()) {
++    throw std::runtime_error("inconsistent dense nodes");
++  }
++
++  qint64 id = 0, lat = 0, lon = 0;
++  for (qsizetype i = 0; i < ids.size(); i++) {
++    id += ids[i];
++    lat += lats[i];
++    lon += lons[i];
++    onNode(id, toE7(params.latOffset, params.granularity, lat), toE7(params.lonOffset, params.granularity, lon));
++  }
++}
++
++void parseWay(QByteArrayView data, CPbfReader::way_t& way) {
++  CProtoBuf buf(data);
++  quint32 field, wire;
++  way.id = 0;
++  way.keys.clear();
++  way.vals.clear();
++  way.refs.clear();
++  while (buf.next(field, wire)) {
++    if (field == 1 && wire == 0) {
++      way.id = qint64(buf.varint());
++    } else if (field == 2) {
++      readRepeated<quint32, false>(buf, wire, way.keys);
++    } else if (field == 3) {
++      readRepeated<quint32, false>(buf, wire, way.vals);
++    } else if (field == 8) {
++      readRepeated<qint64, true>(buf, wire, way.refs);
++    } else {
++      buf.skip(wire);
++    }
++  }
++  if (way.keys.size() != way.vals.size()) {
++    throw std::runtime_error("inconsistent way tags");
++  }
++  // refs are delta coded
++  for (qsizetype i = 1; i < way.refs.size(); i++) {
++    way.refs[i] += way.refs[i - 1];
++  }
++}
++}  // namespace
++
++CPbfReader::CPbfReader(const QString& filename) : file(filename) {}
++
++bool CPbfReader::open() {
++  if (!file.open(QIODevice::ReadOnly)) {
++    error = file.errorString();
++    return false;
++  }
++
++  QByteArray type, data;
++  if (!nextBlob(type, data)) {
++    return false;
++  }
++  if (type != "OSMHeader") {
++    error = QString("Not an OSM PBF file: first block is '%1'").arg(QString::fromUtf8(type));
++    return false;
++  }
++
++  try {
++    parseHeaderBlock(data, hdr);
++  } catch (const std::exception& e) {
++    error = QString("Broken OSM header: %1").arg(e.what());
++    return false;
++  }
++
++  static const QStringList supported = {"OsmSchema-V0.6", "DenseNodes", "HistoricalInformation", "Sort.Type_then_ID",
++                                        "LocationsOnWays"};
++  for (const QString& feature : std::as_const(hdr.requiredFeatures)) {
++    if (!supported.contains(feature)) {
++      error = QString("Unsupported PBF feature: %1").arg(feature);
++      return false;
++    }
++  }
++
++  posData = file.pos();
++  return true;
++}
++
++bool CPbfReader::nextBlob(QByteArray& type, QByteArray& data) {
++  type.clear();
++  data.clear();
++
++  const QByteArray len = file.read(4);
++  if (len.isEmpty()) {
++    return false;  // regular end of file
++  }
++  try {
++    if (len.size() != 4) {
++      throw std::runtime_error("truncated block header");
++    }
++    const quint32 sizeHeader = qFromBigEndian<quint32>(len.constData());
++    if (sizeHeader > 64 * 1024) {
++      throw std::runtime_error("block header too large");
++    }
++    const QByteArray header = file.read(sizeHeader);
++    if (header.size() != qsizetype(sizeHeader)) {
++      throw std::runtime_error("truncated block header");
++    }
++
++    quint64 sizeData = 0;
++    CProtoBuf bufHeader(header);
++    quint32 field, wire;
++    while (bufHeader.next(field, wire)) {
++      if (field == 1 && wire == 2) {
++        type = bufHeader.bytes().toByteArray();
++      } else if (field == 3 && wire == 0) {
++        sizeData = bufHeader.varint();
++      } else {
++        bufHeader.skip(wire);
++      }
++    }
++    if (sizeData > 64 * 1024 * 1024) {
++      throw std::runtime_error("block too large");
++    }
++
++    const QByteArray blob = file.read(qint64(sizeData));
++    if (blob.size() != qsizetype(sizeData)) {
++      throw std::runtime_error("truncated block");
++    }
++
++    QByteArrayView raw, zlib;
++    quint64 rawSize = 0;
++    bool otherCompression = false;
++    CProtoBuf bufBlob(blob);
++    while (bufBlob.next(field, wire)) {
++      if (field == 1 && wire == 2) {
++        raw = bufBlob.bytes();
++      } else if (field == 2 && wire == 0) {
++        rawSize = bufBlob.varint();
++      } else if (field == 3 && wire == 2) {
++        zlib = bufBlob.bytes();
++      } else if (field >= 4 && field <= 7) {
++        otherCompression = true;
++        bufBlob.skip(wire);
++      } else {
++        bufBlob.skip(wire);
++      }
++    }
++
++    if (!raw.isNull()) {
++      data = raw.toByteArray();
++    } else if (!zlib.isNull()) {
++      if (rawSize > 64 * 1024 * 1024) {
++        throw std::runtime_error("block too large");
++      }
++      // qUncompress() wants the expected size as big endian prefix
++      QByteArray compressed(4 + zlib.size(), Qt::Uninitialized);
++      qToBigEndian<quint32>(quint32(rawSize), compressed.data());
++      memcpy(compressed.data() + 4, zlib.data(), zlib.size());
++      data = qUncompress(compressed);
++      if (quint64(data.size()) != rawSize) {
++        throw std::runtime_error("zlib decompression failed");
++      }
++    } else if (otherCompression) {
++      throw std::runtime_error("unsupported compression (only zlib is supported)");
++    }
++  } catch (const std::exception& e) {
++    error = QString("Broken PBF file at offset %1: %2").arg(file.pos()).arg(e.what());
++    return false;
++  }
++
++  return true;
++}
++
++void CPbfReader::parseHeaderBlock(const QByteArray& data, header_t& hdr) {
++  CProtoBuf buf(data);
++  quint32 field, wire;
++  while (buf.next(field, wire)) {
++    if (field == 1 && wire == 2) {
++      CProtoBuf bbox(buf.bytes());
++      quint32 f, w;
++      while (bbox.next(f, w)) {
++        if (w != 0) {
++          bbox.skip(w);
++          continue;
++        }
++        const qreal deg = bbox.svarint() * 1e-9;
++        switch (f) {
++          case 1:
++            hdr.left = deg;
++            break;
++          case 2:
++            hdr.right = deg;
++            break;
++          case 3:
++            hdr.top = deg;
++            break;
++          case 4:
++            hdr.bottom = deg;
++            break;
++        }
++      }
++      hdr.hasBBox = true;
++    } else if (field == 4 && wire == 2) {
++      hdr.requiredFeatures << QString::fromUtf8(buf.bytes());
++    } else if (field == 16 && wire == 2) {
++      hdr.writingProgram = QString::fromUtf8(buf.bytes());
++    } else if (field == 17 && wire == 2) {
++      hdr.source = QString::fromUtf8(buf.bytes());
++    } else if (field == 32 && wire == 0) {
++      hdr.timestamp = qint64(buf.varint());
++    } else {
++      buf.skip(wire);
++    }
++  }
++}
++
++void CPbfReader::parsePrimitiveBlock(const QByteArray& data, int what, const fNode& onNode, const fWay& onWay) {
++  CProtoBuf buf(data);
++  quint32 field, wire;
++  block_params_t params;
++  QVector<QByteArray> strings;
++  QVector<QByteArrayView> groups;
++
++  // granularity and offsets follow the groups, so collect the groups first
++  while (buf.next(field, wire)) {
++    if (field == 1 && wire == 2) {
++      CProtoBuf table(buf.bytes());
++      quint32 f, w;
++      while (table.next(f, w)) {
++        if (f == 1 && w == 2) {
++          strings << table.bytes().toByteArray();
++        } else {
++          table.skip(w);
++        }
++      }
++    } else if (field == 2 && wire == 2) {
++      groups << buf.bytes();
++    } else if (field == 17 && wire == 0) {
++      params.granularity = qint64(buf.varint());
++    } else if (field == 19 && wire == 0) {
++      params.latOffset = qint64(buf.varint());
++    } else if (field == 20 && wire == 0) {
++      params.lonOffset = qint64(buf.varint());
++    } else {
++      buf.skip(wire);
++    }
++  }
++
++  way_t way;
++  for (const QByteArrayView& group : std::as_const(groups)) {
++    CProtoBuf bufGroup(group);
++    while (bufGroup.next(field, wire)) {
++      if (field == 1 && wire == 2 && (what & eNodes)) {
++        parseNode(bufGroup.bytes(), params, onNode);
++      } else if (field == 2 && wire == 2 && (what & eNodes)) {
++        parseDenseNodes(bufGroup.bytes(), params, onNode);
++      } else if (field == 3 && wire == 2 && (what & eWays)) {
++        parseWay(bufGroup.bytes(), way);
++        for (quint32 idx : std::as_const(way.keys)) {
++          if (idx >= quint32(strings.size())) {
++            throw std::runtime_error("string index out of range");
++          }
++        }
++        for (quint32 idx : std::as_const(way.vals)) {
++          if (idx >= quint32(strings.size())) {
++            throw std::runtime_error("string index out of range");
++          }
++        }
++        onWay(way, strings);
++      } else {
++        bufGroup.skip(wire);
++      }
++    }
++  }
++}
++
++bool CPbfReader::readData(int what, const fNode& onNode, const fWay& onWay, const fProgress& progress) {
++  if (!file.isOpen() || !file.seek(posData)) {
++    error = "PBF file is not open";
++    return false;
++  }
++
++  QByteArray type, data;
++  while (nextBlob(type, data)) {
++    if (type == "OSMData") {
++      try {
++        parsePrimitiveBlock(data, what, onNode, onWay);
++      } catch (const std::exception& e) {
++        error = QString("Broken PBF data block before offset %1: %2").arg(file.pos()).arg(e.what());
++        return false;
++      }
++    }
++    if (progress && !progress(file.pos())) {
++      error = "aborted";
++      return false;
++    }
++  }
++
++  return error.isEmpty();
++}
+diff --git a/src/qmapshack/gis/trk/surface/CPbfReader.h b/src/qmapshack/gis/trk/surface/CPbfReader.h
+new file mode 100644
+index 0000000..d8cbc8e
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CPbfReader.h
+@@ -0,0 +1,99 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CPBFREADER_H
++#define CPBFREADER_H
++
++#include <QByteArray>
++#include <QFile>
++#include <QStringList>
++#include <QVector>
++#include <functional>
++
++/**
++   @brief Minimal reader for OpenStreetMap .osm.pbf files
++
++   Reads nodes (plain and dense) and ways with their tags. Relations, metadata and history are
++   skipped. Only uncompressed and zlib compressed blobs are supported, which covers the extracts
++   of the common download services (e.g. Geofabrik).
++
++   Locations are returned as integers in 1e-7 degrees, exactly as libosmium stores them.
++ */
++class CPbfReader {
++ public:
++  struct header_t {
++    bool hasBBox = false;
++    qreal left = 0;  ///< bounding box in degrees
++    qreal right = 0;
++    qreal top = 0;
++    qreal bottom = 0;
++    qint64 timestamp = 0;  ///< osmosis replication timestamp, seconds since epoch, 0 if unknown
++    QStringList requiredFeatures;
++    QString writingProgram;
++    QString source;
++  };
++
++  struct way_t {
++    qint64 id = 0;
++    QVector<quint32> keys;  ///< indices into the block's string table
++    QVector<quint32> vals;
++    QVector<qint64> refs;  ///< node ids
++  };
++
++  enum what_e { eNodes = 0x01, eWays = 0x02 };
++
++  /// called per node: id, latitude and longitude in 1e-7 degrees
++  using fNode = std::function<void(qint64 id, qint32 lat, qint32 lon)>;
++  /// called per way, with the string table of its block
++  using fWay = std::function<void(const way_t& way, const QVector<QByteArray>& strings)>;
++  /// called after each block with the file position, return false to abort
++  using fProgress = std::function<bool(qint64 pos)>;
++
++  CPbfReader(const QString& filename);
++  virtual ~CPbfReader() = default;
++
++  /// open the file and read its header block
++  bool open();
++  const header_t& header() const { return hdr; }
++  qint64 size() const { return file.size(); }
++  QString errorString() const { return error; }
++
++  /**
++     @brief Read all data blocks from the start of the file
++     @param what      a combination of what_e
++     @param onNode    called for each node if eNodes is set
++     @param onWay     called for each way if eWays is set
++     @param progress  called after each block, may be empty
++     @return false on error or abort, see errorString()
++   */
++  bool readData(int what, const fNode& onNode, const fWay& onWay, const fProgress& progress);
++
++  /// decompress and parse a single PrimitiveBlock (exposed for tests)
++  static void parsePrimitiveBlock(const QByteArray& data, int what, const fNode& onNode, const fWay& onWay);
++  static void parseHeaderBlock(const QByteArray& data, header_t& hdr);
++
++ private:
++  bool nextBlob(QByteArray& type, QByteArray& data);
++
++  QFile file;
++  QString error;
++  header_t hdr;
++  qint64 posData = 0;
++};
++
++#endif  // CPBFREADER_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurface.cpp b/src/qmapshack/gis/trk/surface/CSurface.cpp
+new file mode 100644
+index 0000000..f145785
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurface.cpp
+@@ -0,0 +1,247 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurface.h"
++
++#include <QHash>
++
++namespace {
++struct surface_t {
++  CSurface::label_e label;
++  CSurface::class_e cls;
++};
++
++// OSM surface=* values; anything not listed falls back to the highway's assumption
++const QHash<QString, surface_t> surfaces = {
++    {"asphalt", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
++    {"paved", {CSurface::eLabelPaved, CSurface::eClassPaved}},
++    {"chipseal", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
++    {"concrete", {CSurface::eLabelConcrete, CSurface::eClassPaved}},
++    {"concrete:lanes", {CSurface::eLabelConcreteLanes, CSurface::eClassPaved}},
++    {"concrete:plates", {CSurface::eLabelConcretePlates, CSurface::eClassPaved}},
++    {"paving_stones", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
++    {"sett", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++    {"cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++    {"unhewn_cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++    {"bricks", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
++    {"metal", {CSurface::eLabelMetal, CSurface::eClassPaved}},
++    {"wood", {CSurface::eLabelWood, CSurface::eClassPaved}},
++    {"compacted", {CSurface::eLabelCompacted, CSurface::eClassSemiPaved}},
++    {"fine_gravel", {CSurface::eLabelFineGravel, CSurface::eClassSemiPaved}},
++    {"gravel", {CSurface::eLabelGravel, CSurface::eClassSemiPaved}},
++    {"pebblestone", {CSurface::eLabelPebblestone, CSurface::eClassSemiPaved}},
++    {"grass_paver", {CSurface::eLabelGrassPaver, CSurface::eClassSemiPaved}},
++    {"unpaved", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++    {"dirt", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
++    {"earth", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
++    {"ground", {CSurface::eLabelGround, CSurface::eClassUnpaved}},
++    {"grass", {CSurface::eLabelGrass, CSurface::eClassUnpaved}},
++    {"mud", {CSurface::eLabelMud, CSurface::eClassUnpaved}},
++    {"sand", {CSurface::eLabelSand, CSurface::eClassUnpaved}},
++    {"woodchips", {CSurface::eLabelWoodchips, CSurface::eClassUnpaved}},
++    {"rock", {CSurface::eLabelRock, CSurface::eClassUnpaved}},
++    {"stepping_stones", {CSurface::eLabelSteppingStones, CSurface::eClassUnpaved}},
++};
++
++const QHash<QString, surface_t> tracktypes = {
++    {"grade1", {CSurface::eLabelPaved, CSurface::eClassPaved}},
++    {"grade2", {CSurface::eLabelSemiPaved, CSurface::eClassSemiPaved}},
++    {"grade3", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++    {"grade4", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++    {"grade5", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++};
++
++const QHash<QString, CSurface::waytype_e> waytypes = {
++    {"path", CSurface::eWayPath},
++    {"footway", CSurface::eWayPath},
++    {"bridleway", CSurface::eWayPath},
++    {"steps", CSurface::eWaySteps},
++    {"track", CSurface::eWayTrack},
++    {"cycleway", CSurface::eWayCycleway},
++    {"residential", CSurface::eWayStreet},
++    {"living_street", CSurface::eWayStreet},
++    {"pedestrian", CSurface::eWayStreet},
++    {"unclassified", CSurface::eWayRoad},
++    {"service", CSurface::eWayRoad},
++    {"tertiary", CSurface::eWayRoad},
++    {"tertiary_link", CSurface::eWayRoad},
++    {"secondary", CSurface::eWayBusyRoad},
++    {"secondary_link", CSurface::eWayBusyRoad},
++    {"primary", CSurface::eWayBusyRoad},
++    {"primary_link", CSurface::eWayBusyRoad},
++    {"trunk", CSurface::eWayBusyRoad},
++};
++}  // namespace
++
++CSurface::waytype_e CSurface::wayType(const QString& highway) { return waytypes.value(highway, eWayOther); }
++
++CSurface::info_t CSurface::classify(const tags_t& tags) {
++  const waytype_e way = wayType(tags.highway);
++
++  auto surface = surfaces.constFind(tags.surface);
++  if (surface != surfaces.constEnd()) {
++    return {surface->label, surface->cls, way};
++  }
++
++  if (tags.highway == "track") {
++    auto tracktype = tracktypes.constFind(tags.tracktype);
++    if (tracktype != tracktypes.constEnd()) {
++      return {tracktype->label, tracktype->cls, way};
++    }
++    return {eLabelUnknown, eClassUnknown, way};
++  }
++
++  if (tags.highway == "path" || tags.highway == "bridleway" ||
++      (tags.highway == "footway" && tags.footway != "sidewalk")) {
++    return {eLabelUnpavedAssumed, eClassUnpaved, way};
++  }
++
++  // roads, streets, sidewalks: asphalt in practice
++  return {eLabelPavedAssumed, eClassPaved, way};
++}
++
++QString CSurface::className(class_e cls) {
++  switch (cls) {
++    case eClassPaved:
++      return tr("paved", "surface class");
++    case eClassSemiPaved:
++      return tr("semi-paved", "surface class");
++    case eClassUnpaved:
++      return tr("unpaved", "surface class");
++    default:
++      return tr("unknown", "surface class");
++  }
++}
++
++QString CSurface::wayTypeName(waytype_e way) {
++  switch (way) {
++    case eWayPath:
++      return tr("path", "way type");
++    case eWayTrack:
++      return tr("forest/field track", "way type");
++    case eWayCycleway:
++      return tr("cycleway", "way type");
++    case eWaySteps:
++      return tr("steps", "way type");
++    case eWayStreet:
++      return tr("street", "way type");
++    case eWayRoad:
++      return tr("road", "way type");
++    case eWayBusyRoad:
++      return tr("busy road", "way type");
++    case eWayOther:
++      return tr("other", "way type");
++    default:
++      return tr("no data", "way type");
++  }
++}
++
++QString CSurface::labelName(label_e label) {
++  switch (label) {
++    case eLabelAsphalt:
++      return tr("asphalt", "surface");
++    case eLabelPaved:
++      return tr("paved", "surface");
++    case eLabelConcrete:
++      return tr("concrete", "surface");
++    case eLabelConcreteLanes:
++      return tr("concrete lanes", "surface");
++    case eLabelConcretePlates:
++      return tr("concrete plates", "surface");
++    case eLabelPavingStones:
++      return tr("paving stones", "surface");
++    case eLabelCobblestone:
++      return tr("cobblestones", "surface");
++    case eLabelMetal:
++      return tr("metal", "surface");
++    case eLabelWood:
++      return tr("wood", "surface");
++    case eLabelCompacted:
++      return tr("compacted", "surface");
++    case eLabelFineGravel:
++      return tr("fine gravel", "surface");
++    case eLabelGravel:
++      return tr("gravel", "surface");
++    case eLabelPebblestone:
++      return tr("pebblestone", "surface");
++    case eLabelGrassPaver:
++      return tr("grass pavers", "surface");
++    case eLabelSemiPaved:
++      return tr("semi-paved", "surface");
++    case eLabelUnpaved:
++      return tr("unpaved", "surface");
++    case eLabelDirt:
++      return tr("dirt", "surface");
++    case eLabelGround:
++      return tr("natural ground", "surface");
++    case eLabelGrass:
++      return tr("grass", "surface");
++    case eLabelMud:
++      return tr("mud", "surface");
++    case eLabelSand:
++      return tr("sand", "surface");
++    case eLabelWoodchips:
++      return tr("woodchips", "surface");
++    case eLabelRock:
++      return tr("rock", "surface");
++    case eLabelSteppingStones:
++      return tr("stepping stones", "surface");
++    case eLabelPavedAssumed:
++      return tr("paved (assumed)", "surface");
++    case eLabelUnpavedAssumed:
++      return tr("unpaved (assumed)", "surface");
++    default:
++      return tr("unknown", "surface");
++  }
++}
++
++QColor CSurface::classColor(class_e cls) {
++  switch (cls) {
++    case eClassPaved:
++      return QColor(0x54, 0x6e, 0x7a);  // blue grey
++    case eClassSemiPaved:
++      return QColor(0xf9, 0xa8, 0x25);  // amber
++    case eClassUnpaved:
++      return QColor(0x79, 0x55, 0x48);  // brown
++    default:
++      return QColor(0xe0, 0x40, 0xfb);  // magenta: clearly "no information"
++  }
++}
++
++QColor CSurface::wayTypeColor(waytype_e way) {
++  switch (way) {
++    case eWayPath:
++      return QColor(0x2e, 0x7d, 0x32);  // green
++    case eWayTrack:
++      return QColor(0x8d, 0x6e, 0x63);  // light brown
++    case eWayCycleway:
++      return QColor(0x1e, 0x88, 0xe5);  // blue
++    case eWaySteps:
++      return QColor(0x6a, 0x1b, 0x9a);  // purple
++    case eWayStreet:
++      return QColor(0xfd, 0xd8, 0x35);  // yellow
++    case eWayRoad:
++      return QColor(0xfb, 0x8c, 0x00);  // orange
++    case eWayBusyRoad:
++      return QColor(0xd3, 0x2f, 0x2f);  // red
++    case eWayOther:
++      return QColor(0x75, 0x75, 0x75);  // grey
++    default:
++      return QColor(0xe0, 0x40, 0xfb);  // magenta, as the unknown surface class
++  }
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurface.h b/src/qmapshack/gis/trk/surface/CSurface.h
+new file mode 100644
+index 0000000..4c64986
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurface.h
+@@ -0,0 +1,127 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACE_H
++#define CSURFACE_H
++
++#include <QColor>
++#include <QCoreApplication>
++#include <QString>
++
++/**
++   @brief Classification of OpenStreetMap ways into surface classes and way types
++
++   The classes follow what a walker or cyclist feels, like the "surfaces" and "way types" of
++   popular route planners. A way's tags map to a detailed surface label, a surface class and a
++   way type. Tags missing on a way are filled with the usual assumption for its highway type.
++ */
++class CSurface {
++  Q_DECLARE_TR_FUNCTIONS(CSurface)
++ public:
++  enum class_e : qint8 {
++    eClassPaved = 0,      ///< asphalt, concrete, cobbles/pavers, roads without surface tag
++    eClassSemiPaved = 1,  ///< compacted, (fine) gravel, tracktype grade2
++    eClassUnpaved = 2,    ///< dirt, ground, grass, sand, rock, grade3-5, paths without surface tag
++    eClassUnknown = 3,    ///< tracks without surface and tracktype, or no way found
++    eClassCount = 4
++  };
++
++  enum waytype_e : qint8 {
++    eWayPath = 0,  ///< path, footway, bridleway
++    eWayTrack,     ///< track (forest/field road)
++    eWayCycleway,  ///< cycleway
++    eWaySteps,     ///< steps
++    eWayStreet,    ///< residential, living_street, pedestrian
++    eWayRoad,      ///< unclassified, service, tertiary
++    eWayBusyRoad,  ///< secondary, primary, trunk
++    eWayOther,     ///< any other highway value
++    eWayNoData,    ///< no way found close to the track
++    eWayCount
++  };
++
++  enum label_e : qint8 {
++    eLabelAsphalt = 0,
++    eLabelPaved,
++    eLabelConcrete,
++    eLabelConcreteLanes,
++    eLabelConcretePlates,
++    eLabelPavingStones,
++    eLabelCobblestone,
++    eLabelMetal,
++    eLabelWood,
++    eLabelCompacted,
++    eLabelFineGravel,
++    eLabelGravel,
++    eLabelPebblestone,
++    eLabelGrassPaver,
++    eLabelSemiPaved,
++    eLabelUnpaved,
++    eLabelDirt,
++    eLabelGround,
++    eLabelGrass,
++    eLabelMud,
++    eLabelSand,
++    eLabelWoodchips,
++    eLabelRock,
++    eLabelSteppingStones,
++    eLabelPavedAssumed,
++    eLabelUnpavedAssumed,
++    eLabelUnknown,
++    eLabelCount
++  };
++
++  /// the OSM tags of a way the classification depends on
++  struct tags_t {
++    QString highway;
++    QString surface;
++    QString tracktype;
++    QString footway;
++  };
++
++  /// the result of a classification
++  struct info_t {
++    label_e label = eLabelUnknown;
++    class_e cls = eClassUnknown;
++    waytype_e way = eWayNoData;
++
++    bool operator==(const info_t& other) const { return label == other.label && cls == other.cls && way == other.way; }
++    bool operator!=(const info_t& other) const { return !(*this == other); }
++  };
++
++  /// the info used for track parts without any way close by
++  static info_t noData() { return {eLabelUnknown, eClassUnknown, eWayNoData}; }
++
++  /**
++     @brief Classify a way by its tags
++     @param tags  the way's highway, surface, tracktype and footway tags
++     @return label, class and way type
++   */
++  static info_t classify(const tags_t& tags);
++
++  /// map a highway tag value to a way type
++  static waytype_e wayType(const QString& highway);
++
++  static QString className(class_e cls);
++  static QString wayTypeName(waytype_e way);
++  static QString labelName(label_e label);
++
++  static QColor classColor(class_e cls);
++  static QColor wayTypeColor(waytype_e way);
++};
++
++#endif  // CSURFACE_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.cpp b/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.cpp
+new file mode 100644
+index 0000000..96a4ed4
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.cpp
+@@ -0,0 +1,102 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceAnalyzer.h"
++
++#include <QtMath>
++
++#include "gis/trk/surface/CSurfaceDb.h"
++
++namespace {
++struct sample_t {
++  qint32 idxPoint;  ///< the input point the sample belongs to (its start)
++  bool atPoint;     ///< the sample lies on the input point itself
++  qreal length;
++  CSurface::info_t info;
++};
++}  // namespace
++
++CSurfaceAnalyzer::result_t CSurfaceAnalyzer::analyze(const QVector<point_t>& points, const fLookup& lookup,
++                                                     const options_t& options, const std::atomic_bool* cancel) {
++  result_t result;
++  result.perPoint.fill(CSurface::noData(), points.size());
++
++  auto get = [&](qreal lat, qreal lon) {
++    std::optional<CSurface::info_t> info = lookup(lat, lon);
++    if (info) {
++      result.samplesWithData++;
++    }
++    result.samples++;
++    return info ? *info : CSurface::noData();
++  };
++
++  qint32 start = 0;
++  while (start < points.size()) {
++    // one track segment: [start, end)
++    qint32 end = start + 1;
++    while (end < points.size() && !points[end].newSegment) {
++      end++;
++    }
++
++    QVector<sample_t> samples;
++    for (qint32 i = start; i < end; i++) {
++      if (cancel != nullptr && cancel->load()) {
++        return result;
++      }
++      const point_t& p1 = points[i];
++      if (i + 1 == end) {
++        samples << sample_t{i, true, 0, get(p1.lat, p1.lon)};
++        break;
++      }
++
++      const point_t& p2 = points[i + 1];
++      const qreal d = CSurfaceDb::distance(p1.lat, p1.lon, p2.lat, p2.lon);
++      const qint32 n = options.sampleDistance > 0 ? qMax(1, qCeil(d / options.sampleDistance)) : 1;
++      for (qint32 k = 0; k < n; k++) {
++        const qreal f = qreal(k) / n;
++        const qreal lat = p1.lat + (p2.lat - p1.lat) * f;
++        const qreal lon = p1.lon + (p2.lon - p1.lon) * f;
++        samples << sample_t{i, k == 0, d / n, get(lat, lon)};
++      }
++    }
++
++    if (options.smooth && samples.size() > 2) {
++      const QVector<sample_t> raw = samples;
++      for (qsizetype s = 1; s + 1 < raw.size(); s++) {
++        if (raw[s].info != raw[s - 1].info && raw[s - 1].info == raw[s + 1].info) {
++          samples[s].info = raw[s - 1].info;
++        }
++      }
++    }
++
++    for (const sample_t& sample : std::as_const(samples)) {
++      if (sample.atPoint) {
++        result.perPoint[sample.idxPoint] = sample.info;
++      }
++      result.total += sample.length;
++      result.byClass[sample.info.cls] += sample.length;
++      result.byWay[sample.info.way] += sample.length;
++      result.byLabel[sample.info.label] += sample.length;
++    }
++
++    start = end;
++  }
++
++  result.valid = true;
++  return result;
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.h b/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.h
+new file mode 100644
+index 0000000..df869cd
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceAnalyzer.h
+@@ -0,0 +1,72 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEANALYZER_H
++#define CSURFACEANALYZER_H
++
++#include <QVector>
++#include <array>
++#include <atomic>
++#include <functional>
++#include <optional>
++
++#include "gis/trk/surface/CSurface.h"
++
++/**
++   @brief Surface and way type along a track
++
++   The track is sampled about every `sampleDistance` meters. Each sample gets the way found at
++   its position (see CSurfaceDbSet::lookup()) and stands for the stretch up to the next sample.
++   A single sample that differs from two equal neighbours is taken for a crossing and smoothed
++   away. The lengths are summed per surface class, way type and detailed surface.
++ */
++class CSurfaceAnalyzer {
++ public:
++  struct point_t {
++    qreal lat = 0;
++    qreal lon = 0;
++    bool newSegment = false;  ///< true for the first point of a track segment: no distance to the previous one
++  };
++
++  struct options_t {
++    qreal sampleDistance = 20;    ///< 0: use the track points only, as the reference implementation does
++    qreal fallbackDistance = 25;  ///< nearest way within this distance if no way passes the cell
++    bool smooth = true;
++  };
++
++  using fLookup = std::function<std::optional<CSurface::info_t>(qreal lat, qreal lon)>;
++
++  struct result_t {
++    bool valid = false;                  ///< false if canceled
++    QVector<CSurface::info_t> perPoint;  ///< one entry per input point
++    qreal total = 0;                     ///< meters
++    std::array<qreal, CSurface::eClassCount> byClass{};
++    std::array<qreal, CSurface::eWayCount> byWay{};
++    std::array<qreal, CSurface::eLabelCount> byLabel{};
++    qint32 samples = 0;
++    qint32 samplesWithData = 0;
++
++    /// share of a class in percent
++    qreal percent(CSurface::class_e cls) const { return total > 0 ? 100.0 * byClass[cls] / total : 0; }
++  };
++
++  static result_t analyze(const QVector<point_t>& points, const fLookup& lookup, const options_t& options,
++                          const std::atomic_bool* cancel = nullptr);
++};
++
++#endif  // CSURFACEANALYZER_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
+new file mode 100644
+index 0000000..381876a
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
+@@ -0,0 +1,325 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceDb.h"
++
++#include <QSqlError>
++#include <QTimeZone>
++#include <QUuid>
++#include <QVarLengthArray>
++#include <QtEndian>
++#include <QtMath>
++#include <cmath>
++
++CSurfaceDb::CSurfaceDb(const QString& filename) : file(filename) {
++  connection = "surface-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
++  {
++    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
++    db.setDatabaseName(filename);
++    db.setConnectOptions("QSQLITE_OPEN_READONLY");
++    if (!db.open()) {
++      error = db.lastError().text();
++      return;
++    }
++
++    QSqlQuery query(db);
++    if (!query.exec("SELECT key, value FROM meta")) {
++      error = QString("Not a surface database: %1").arg(query.lastError().text());
++      return;
++    }
++    while (query.next()) {
++      meta[query.value(0).toString()] = query.value(1).toString();
++    }
++    if (meta.value("schema").toInt() != schemaVersion) {
++      error = QString("Unsupported surface database version %1").arg(meta.value("schema"));
++      return;
++    }
++
++    bbox = QRectF(QPointF(meta.value("minLon").toDouble(), meta.value("minLat").toDouble()),
++                  QPointF(meta.value("maxLon").toDouble(), meta.value("maxLat").toDouble()));
++
++    if (!query.exec("SELECT id, highway, surface, tracktype, footway FROM tags")) {
++      error = query.lastError().text();
++      return;
++    }
++    QHash<QString, qint32> keys;
++    while (query.next()) {
++      const qint32 id = query.value(0).toInt();
++      const CSurface::tags_t tags = {query.value(1).toString(), query.value(2).toString(), query.value(3).toString(),
++                                     query.value(4).toString()};
++      const CSurface::info_t info = CSurface::classify(tags);
++      infoByTag[id] = info;
++
++      // unknown highway values stay apart, as in the reference implementation
++      const QString key = QString("%1|%2|%3|%4")
++                              .arg(info.label)
++                              .arg(info.cls)
++                              .arg(info.way)
++                              .arg(info.way == CSurface::eWayOther ? tags.highway : QString());
++      if (!keys.contains(key)) {
++        keys[key] = infoByKey.size();
++        infoByKey << info;
++      }
++      keyByTag[id] = keys[key];
++    }
++
++    queryChunks = QSqlQuery(db);
++    queryChunks.setForwardOnly(true);
++    if (!queryChunks.prepare("SELECT c.tag, c.nodes FROM chunk_index AS i JOIN chunks AS c ON c.id = i.id "
++                             "WHERE i.maxLat >= ? AND i.minLat <= ? AND i.maxLon >= ? AND i.minLon <= ? "
++                             "ORDER BY c.id")) {
++      error = queryChunks.lastError().text();
++      return;
++    }
++  }
++  valid = true;
++}
++
++CSurfaceDb::~CSurfaceDb() {
++  queryChunks = QSqlQuery();
++  {
++    QSqlDatabase db = QSqlDatabase::database(connection, false);
++    db.close();
++  }
++  QSqlDatabase::removeDatabase(connection);
++}
++
++QDateTime CSurfaceDb::osmTimestamp() const {
++  const qint64 t = meta.value("osmTimestamp").toLongLong();
++  return t > 0 ? QDateTime::fromSecsSinceEpoch(t, QTimeZone::UTC) : QDateTime();
++}
++
++QDateTime CSurfaceDb::created() const { return QDateTime::fromString(meta.value("created"), Qt::ISODate); }
++
++qint64 CSurfaceDb::chunkCount() const { return meta.value("chunks").toLongLong(); }
++
++qreal CSurfaceDb::distance(qreal lat1, qreal lon1, qreal lat2, qreal lon2) {
++  constexpr qreal degToRad = M_PI / 180.0;
++  const qreal la1 = lat1 * degToRad;
++  const qreal lo1 = lon1 * degToRad;
++  const qreal la2 = lat2 * degToRad;
++  const qreal lo2 = lon2 * degToRad;
++  const qreal h =
++      std::pow(std::sin((la2 - la1) / 2), 2) + std::cos(la1) * std::cos(la2) * std::pow(std::sin((lo2 - lo1) / 2), 2);
++  return 2 * 6371000.0 * std::asin(std::sqrt(h));
++}
++
++void CSurfaceDb::cell(qreal lat, qreal lon, qint64& row, qint64& col) {
++  // nearbyint() rounds half to even, like Python's round()
++  row = qint64(std::nearbyint(lat * cellsPerDegLat));
++  col = qint64(std::nearbyint(lon * cellsPerDegLon));
++}
++
++bool CSurfaceDb::query(qreal south, qreal north, qreal west, qreal east, QVector<chunk_t>& chunks) {
++  chunks.clear();
++  queryChunks.bindValue(0, south);
++  queryChunks.bindValue(1, north);
++  queryChunks.bindValue(2, west);
++  queryChunks.bindValue(3, east);
++  if (!queryChunks.exec()) {
++    error = queryChunks.lastError().text();
++    return false;
++  }
++  while (queryChunks.next()) {
++    chunk_t chunk;
++    chunk.tag = queryChunks.value(0).toInt();
++    const QByteArray blob = queryChunks.value(1).toByteArray();
++    const qsizetype n = blob.size() / sizeof(qint32);
++    chunk.nodes.resize(n);
++    for (qsizetype i = 0; i < n; i++) {
++      chunk.nodes[i] = qFromLittleEndian<qint32>(blob.constData() + i * sizeof(qint32));
++    }
++    chunks << chunk;
++  }
++  queryChunks.finish();
++  return true;
++}
++
++std::optional<CSurface::info_t> CSurfaceDb::lookupCell(qreal lat, qreal lon) {
++  if (!valid) {
++    return std::nullopt;
++  }
++
++  qint64 row, col;
++  cell(lat, lon, row, col);
++  const QPair<qint64, qint64> id(row, col);
++  auto cached = cacheCells.constFind(id);
++  if (cached != cacheCells.constEnd()) {
++    return *cached < 0 ? std::nullopt : std::optional<CSurface::info_t>(infoByKey[*cached]);
++  }
++
++  constexpr qreal margin = 1e-6;
++  const qreal south = (row - 0.5) / cellsPerDegLat - margin;
++  const qreal north = (row + 0.5) / cellsPerDegLat + margin;
++  const qreal west = (col - 0.5) / cellsPerDegLon - margin;
++  const qreal east = (col + 0.5) / cellsPerDegLon + margin;
++
++  QVector<chunk_t> chunks;
++  if (!query(south, north, west, east, chunks)) {
++    return std::nullopt;
++  }
++
++  // key and sample count, in order of the first sample
++  QVarLengthArray<QPair<qint32, qint32>, 8> counts;
++  for (const chunk_t& chunk : std::as_const(chunks)) {
++    const qint32 key = keyByTag.value(chunk.tag, -1);
++    if (key < 0) {
++      continue;
++    }
++
++    const qsizetype n = chunk.nodes.size() / 2;
++    for (qsizetype j = 0; j + 1 < n; j++) {
++      const qreal lat1 = chunk.nodes[2 * j] / 1e7;
++      const qreal lon1 = chunk.nodes[2 * j + 1] / 1e7;
++      const qreal lat2 = chunk.nodes[2 * j + 2] / 1e7;
++      const qreal lon2 = chunk.nodes[2 * j + 3] / 1e7;
++
++      if (qMax(lat1, lat2) < south || qMin(lat1, lat2) > north || qMax(lon1, lon2) < west || qMin(lon1, lon2) > east) {
++        continue;
++      }
++
++      // the reference samples every ~10 m, both end points included
++      const qint32 steps = qMax(1, qint32(distance(lat1, lon1, lat2, lon2) / 10));
++      for (qint32 i = 0; i <= steps; i++) {
++        qint64 r, c;
++        cell(lat1 + (lat2 - lat1) * i / steps, lon1 + (lon2 - lon1) * i / steps, r, c);
++        if (r != row || c != col) {
++          continue;
++        }
++        bool found = false;
++        for (QPair<qint32, qint32>& count : counts) {
++          if (count.first == key) {
++            count.second++;
++            found = true;
++            break;
++          }
++        }
++        if (!found) {
++          counts.append({key, 1});
++        }
++      }
++    }
++  }
++
++  qint32 best = -1;
++  qint32 bestCount = 0;
++  for (const QPair<qint32, qint32>& count : counts) {
++    if (count.second > bestCount) {
++      best = count.first;
++      bestCount = count.second;
++    }
++  }
++
++  cacheCells[id] = best;
++  return best < 0 ? std::nullopt : std::optional<CSurface::info_t>(infoByKey[best]);
++}
++
++std::optional<CSurface::info_t> CSurfaceDb::lookupNearest(qreal lat, qreal lon, qreal maxDist) {
++  if (!valid || maxDist <= 0) {
++    return std::nullopt;
++  }
++
++  // local equirectangular projection in meters around the position
++  constexpr qreal mPerDeg = 6371000.0 * M_PI / 180.0;
++  const qreal mPerDegLon = mPerDeg * qCos(qDegreesToRadians(lat));
++  const qreal dLat = maxDist / mPerDeg * 1.01;
++  const qreal dLon = maxDist / mPerDegLon * 1.01;
++
++  QVector<chunk_t> chunks;
++  if (!query(lat - dLat, lat + dLat, lon - dLon, lon + dLon, chunks)) {
++    return std::nullopt;
++  }
++
++  qreal bestDist = maxDist;
++  qint32 bestTag = -1;
++  for (const chunk_t& chunk : std::as_const(chunks)) {
++    const qsizetype n = chunk.nodes.size() / 2;
++    for (qsizetype j = 0; j + 1 < n; j++) {
++      const qreal x1 = (chunk.nodes[2 * j + 1] / 1e7 - lon) * mPerDegLon;
++      const qreal y1 = (chunk.nodes[2 * j] / 1e7 - lat) * mPerDeg;
++      const qreal x2 = (chunk.nodes[2 * j + 3] / 1e7 - lon) * mPerDegLon;
++      const qreal y2 = (chunk.nodes[2 * j + 2] / 1e7 - lat) * mPerDeg;
++
++      const qreal dx = x2 - x1;
++      const qreal dy = y2 - y1;
++      const qreal len2 = dx * dx + dy * dy;
++      qreal t = len2 > 0 ? -(x1 * dx + y1 * dy) / len2 : 0;
++      t = qBound(0.0, t, 1.0);
++      const qreal d = std::hypot(x1 + t * dx, y1 + t * dy);
++      if (d <= bestDist && (bestTag < 0 || d < bestDist)) {
++        bestDist = d;
++        bestTag = chunk.tag;
++      }
++    }
++  }
++
++  if (bestTag < 0 || !infoByTag.contains(bestTag)) {
++    return std::nullopt;
++  }
++  return infoByTag[bestTag];
++}
++
++CSurfaceDbSet::CSurfaceDbSet(const QStringList& files) {
++  for (const QString& file : files) {
++    CSurfaceDb* db = new CSurfaceDb(file);
++    if (db->isValid()) {
++      dbs << db;
++    } else {
++      qWarning() << "Surface database" << file << db->errorString();
++      delete db;
++    }
++  }
++}
++
++CSurfaceDbSet::~CSurfaceDbSet() { qDeleteAll(dbs); }
++
++bool CSurfaceDbSet::covers(const QRectF& area) const {
++  for (const CSurfaceDb* db : dbs) {
++    if (db->boundingBox().intersects(area) || db->boundingBox().contains(area.center())) {
++      return true;
++    }
++  }
++  return false;
++}
++
++std::optional<CSurface::info_t> CSurfaceDbSet::lookup(qreal lat, qreal lon, qreal fallbackDist) {
++  // a little slack: a way just outside the data's box can still pass the cell
++  constexpr qreal slack = 0.001;
++  QList<CSurfaceDb*> candidates;
++  for (CSurfaceDb* db : std::as_const(dbs)) {
++    if (db->boundingBox().adjusted(-slack, -slack, slack, slack).contains(QPointF(lon, lat))) {
++      candidates << db;
++    }
++  }
++
++  for (CSurfaceDb* db : std::as_const(candidates)) {
++    std::optional<CSurface::info_t> info = db->lookupCell(lat, lon);
++    if (info) {
++      return info;
++    }
++  }
++
++  for (CSurfaceDb* db : std::as_const(candidates)) {
++    std::optional<CSurface::info_t> info = db->lookupNearest(lat, lon, fallbackDist);
++    if (info) {
++      return info;
++    }
++  }
++
++  return std::nullopt;
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDb.h b/src/qmapshack/gis/trk/surface/CSurfaceDb.h
+new file mode 100644
+index 0000000..3244dfe
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDb.h
+@@ -0,0 +1,143 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEDB_H
++#define CSURFACEDB_H
++
++#include <QDateTime>
++#include <QHash>
++#include <QRectF>
++#include <QSqlDatabase>
++#include <QSqlQuery>
++#include <QStringList>
++#include <optional>
++
++#include "gis/trk/surface/CSurface.h"
++
++/**
++   @brief Read access to one surface database file
++
++   A surface database is a SQLite file built from an OpenStreetMap extract by CSurfaceDbBuilder:
++
++   - `meta(key, value)`: schema version, name, source file, OSM timestamp, bounding box
++   - `tags(id, highway, surface, tracktype, footway)`: the distinct tag combinations
++   - `chunks(id, way, tag, nodes)`: pieces of up to 16 segments of a highway, nodes as
++     little endian int32 latitude/longitude pairs in 1e-7 degrees
++   - `chunk_index`: an R*Tree over the chunks' bounding boxes
++
++   The classification is done when reading, so a changed classification needs no rebuild.
++
++   An object holds its own database connection and must only be used in the thread it was
++   created in.
++ */
++class CSurfaceDb {
++ public:
++  static constexpr qint32 schemaVersion = 1;
++  /// edge length of a lookup cell in degrees latitude (~20 m)
++  static constexpr qreal cellsPerDegLat = 5500;
++  /// edge length of a lookup cell in degrees longitude (~20 m at 50 deg N)
++  static constexpr qreal cellsPerDegLon = 3500;
++
++  CSurfaceDb(const QString& filename);
++  virtual ~CSurfaceDb();
++
++  bool isValid() const { return valid; }
++  QString errorString() const { return error; }
++  QString filename() const { return file; }
++  QString name() const { return meta.value("name"); }
++  QString source() const { return meta.value("source"); }
++  QDateTime osmTimestamp() const;
++  QDateTime created() const;
++  qint64 chunkCount() const;
++  /// the area covered by the data, x = longitude, y = latitude
++  QRectF boundingBox() const { return bbox; }
++
++  /**
++     @brief The way at a position, as the majority of all ways passing its ~20 m cell
++
++     Each way is sampled every ~10 m, the classification with the most samples in the cell
++     wins. Equal counts go to the way with the lowest OSM id.
++
++     @return nothing if no way passes the cell
++   */
++  std::optional<CSurface::info_t> lookupCell(qreal lat, qreal lon);
++
++  /**
++     @brief The way closest to a position
++     @param maxDist  the maximum distance in meters
++     @return nothing if there is no way within maxDist
++   */
++  std::optional<CSurface::info_t> lookupNearest(qreal lat, qreal lon, qreal maxDist);
++
++  /// great circle distance in meters, the same formula as the reference implementation
++  static qreal distance(qreal lat1, qreal lon1, qreal lat2, qreal lon2);
++  /// the cell a position falls into
++  static void cell(qreal lat, qreal lon, qint64& row, qint64& col);
++
++ private:
++  struct chunk_t {
++    qint32 tag;
++    QVector<qint32> nodes;  ///< lat, lon, lat, lon, ... in 1e-7 degrees
++  };
++  bool query(qreal south, qreal north, qreal west, qreal east, QVector<chunk_t>& chunks);
++
++  QString file;
++  QString connection;
++  bool valid = false;
++  QString error;
++  QHash<QString, QString> meta;
++  QRectF bbox;
++
++  /// classification per tag id
++  QHash<qint32, CSurface::info_t> infoByTag;
++  /// majority key per tag id: ways with equal classification count together
++  QHash<qint32, qint32> keyByTag;
++  QVector<CSurface::info_t> infoByKey;
++
++  QSqlQuery queryChunks;
++  /// cell -> key index or -1
++  QHash<QPair<qint64, qint64>, qint32> cacheCells;
++};
++
++/**
++   @brief All active surface databases, used together
++
++   Like CSurfaceDb, an object must stay in the thread it was created in.
++ */
++class CSurfaceDbSet {
++ public:
++  CSurfaceDbSet(const QStringList& files);
++  virtual ~CSurfaceDbSet();
++
++  /// true if any database's area intersects the rectangle (x = longitude, y = latitude)
++  bool covers(const QRectF& area) const;
++  bool isEmpty() const { return dbs.isEmpty(); }
++
++  /**
++     @brief The way at a position
++
++     First the cell majority (CSurfaceDb::lookupCell()) of the first database containing the
++     position; if no way passes the cell, the nearest way within fallbackDist meters.
++   */
++  std::optional<CSurface::info_t> lookup(qreal lat, qreal lon, qreal fallbackDist);
++
++ private:
++  QList<CSurfaceDb*> dbs;
++};
++
++#endif  // CSURFACEDB_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
+new file mode 100644
+index 0000000..9f3cef5
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
+@@ -0,0 +1,332 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++
++#include <QDateTime>
++#include <QFile>
++#include <QFileInfo>
++#include <QHash>
++#include <QSqlDatabase>
++#include <QSqlError>
++#include <QSqlQuery>
++#include <QUuid>
++#include <QtEndian>
++#include <algorithm>
++#include <limits>
++#include <vector>
++
++#include "gis/trk/surface/CPbfReader.h"
++#include "gis/trk/surface/CSurfaceDb.h"
++
++const QString CSurfaceDbBuilder::suffix = "surface.sqlite";
++
++CSurfaceDbBuilder::CSurfaceDbBuilder(const options_t& options) : opts(options) {}
++
++bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool* cancel) {
++  stats = stats_t();
++  error.clear();
++
++  auto report = [&](qreal fraction, const QString& step) {
++    if (progress) {
++      progress(fraction, step);
++    }
++  };
++  auto canceled = [&]() { return cancel != nullptr && cancel->load(); };
++
++  CPbfReader reader(opts.pbf);
++  if (!reader.open()) {
++    error = reader.errorString();
++    return false;
++  }
++  const qreal size = qMax<qreal>(1, reader.size());
++
++  // ---- pass 1: ways with a highway tag ----
++  QHash<QString, qint32> tagIds;
++  QVector<QStringList> tags;
++  std::vector<qint32> wayTag;
++  std::vector<qint64> wayId;
++  std::vector<qint64> wayStart;  // index into refs
++  std::vector<qint64> refs;
++
++  const QString step1 = tr("Reading ways...");
++  report(0, step1);
++  bool ok = reader.readData(
++      CPbfReader::eWays, nullptr,
++      [&](const CPbfReader::way_t& way, const QVector<QByteArray>& strings) {
++        QString values[4];
++        bool isHighway = false;
++        for (qsizetype i = 0; i < way.keys.size(); i++) {
++          const QByteArray& key = strings[way.keys[i]];
++          int idx = -1;
++          if (key == "highway") {
++            idx = 0;
++            isHighway = true;
++          } else if (key == "surface") {
++            idx = 1;
++          } else if (key == "tracktype") {
++            idx = 2;
++          } else if (key == "footway") {
++            idx = 3;
++          }
++          if (idx >= 0) {
++            values[idx] = QString::fromUtf8(strings[way.vals[i]]);
++          }
++        }
++        if (!isHighway || way.refs.size() < 2) {
++          return;
++        }
++
++        const QString key = values[0] + '\x1f' + values[1] + '\x1f' + values[2] + '\x1f' + values[3];
++        auto it = tagIds.constFind(key);
++        qint32 tagId;
++        if (it == tagIds.constEnd()) {
++          tagId = tags.size();
++          tagIds.insert(key, tagId);
++          tags << QStringList{values[0], values[1], values[2], values[3]};
++        } else {
++          tagId = *it;
++        }
++
++        wayId.push_back(way.id);
++        wayTag.push_back(tagId);
++        wayStart.push_back(qint64(refs.size()));
++        refs.insert(refs.end(), way.refs.begin(), way.refs.end());
++      },
++      [&](qint64 pos) {
++        report(0.4 * pos / size, step1);
++        return !canceled();
++      });
++  if (!ok) {
++    error = canceled() ? tr("Canceled.") : reader.errorString();
++    return false;
++  }
++  wayStart.push_back(qint64(refs.size()));
++
++  // ---- pass 2: locations of the nodes used by those ways ----
++  const QString step2 = tr("Reading node locations...");
++  report(0.4, step2);
++  std::vector<qint64> needed(refs);
++  std::sort(needed.begin(), needed.end());
++  needed.erase(std::unique(needed.begin(), needed.end()), needed.end());
++  constexpr qint32 invalid = std::numeric_limits<qint32>::min();
++  std::vector<qint32> lats(needed.size(), invalid);
++  std::vector<qint32> lons(needed.size(), invalid);
++
++  size_t cursor = 0;
++  ok = reader.readData(
++      CPbfReader::eNodes,
++      [&](qint64 id, qint32 lat, qint32 lon) {
++        // nodes come sorted by id, so usually the cursor just moves on
++        if (cursor >= needed.size() || needed[cursor] > id) {
++          auto it = std::lower_bound(needed.begin(), needed.end(), id);
++          cursor = size_t(it - needed.begin());
++        } else if (needed[cursor] < id) {
++          auto it = std::lower_bound(needed.begin() + cursor, needed.end(), id);
++          cursor = size_t(it - needed.begin());
++        }
++        if (cursor < needed.size() && needed[cursor] == id) {
++          lats[cursor] = lat;
++          lons[cursor] = lon;
++        }
++      },
++      nullptr,
++      [&](qint64 pos) {
++        report(0.4 + 0.4 * pos / size, step2);
++        return !canceled();
++      });
++  if (!ok) {
++    error = canceled() ? tr("Canceled.") : reader.errorString();
++    return false;
++  }
++
++  // ---- write the database ----
++  const QString step3 = tr("Writing database...");
++  report(0.8, step3);
++
++  const QString tmpFile = opts.target + ".part";
++  QFile::remove(tmpFile);
++  const QString connection = "surface-build-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
++  {
++    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
++    db.setDatabaseName(tmpFile);
++    if (!db.open()) {
++      error = db.lastError().text();
++    } else {
++      auto exec = [&](QSqlQuery& query, const QString& sql = QString()) {
++        if (error.isEmpty() && !(sql.isEmpty() ? query.exec() : query.exec(sql))) {
++          error = query.lastError().text();
++        }
++        return error.isEmpty();
++      };
++
++      QSqlQuery query(db);
++      exec(query, "PRAGMA journal_mode = OFF");
++      exec(query, "PRAGMA synchronous = OFF");
++      exec(query, "PRAGMA page_size = 4096");
++      exec(query, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)");
++      exec(query,
++           "CREATE TABLE tags (id INTEGER PRIMARY KEY, highway TEXT, surface TEXT, tracktype TEXT, footway TEXT)");
++      exec(query, "CREATE TABLE chunks (id INTEGER PRIMARY KEY, way INTEGER, tag INTEGER, nodes BLOB)");
++      exec(query, "CREATE VIRTUAL TABLE chunk_index USING rtree(id, minLat, maxLat, minLon, maxLon)");
++      db.transaction();
++
++      QSqlQuery insertTag(db);
++      insertTag.prepare("INSERT INTO tags (id, highway, surface, tracktype, footway) VALUES (?, ?, ?, ?, ?)");
++      for (qint32 i = 0; i < tags.size() && error.isEmpty(); i++) {
++        insertTag.bindValue(0, i);
++        for (int j = 0; j < 4; j++) {
++          insertTag.bindValue(j + 1, tags[i][j]);
++        }
++        exec(insertTag);
++      }
++      stats.tags = tags.size();
++
++      QSqlQuery insertChunk(db);
++      insertChunk.prepare("INSERT INTO chunks (id, way, tag, nodes) VALUES (?, ?, ?, ?)");
++      QSqlQuery insertIndex(db);
++      insertIndex.prepare("INSERT INTO chunk_index (id, minLat, maxLat, minLon, maxLon) VALUES (?, ?, ?, ?, ?)");
++
++      const bool filter = opts.area.isValid();
++      qint32 minLat = std::numeric_limits<qint32>::max(), maxLat = invalid;
++      qint32 minLon = std::numeric_limits<qint32>::max(), maxLon = invalid;
++      std::vector<qint32> nodes;
++      const size_t ways = wayId.size();
++      for (size_t w = 0; w < ways && error.isEmpty(); w++) {
++        if ((w & 0x3FFF) == 0) {
++          if (canceled()) {
++            error = tr("Canceled.");
++            break;
++          }
++          report(0.8 + 0.2 * w / qMax<size_t>(1, ways), step3);
++        }
++
++        nodes.clear();
++        bool inside = !filter;
++        for (qint64 r = wayStart[w]; r < wayStart[w + 1]; r++) {
++          const size_t idx = size_t(std::lower_bound(needed.begin(), needed.end(), refs[r]) - needed.begin());
++          if (lats[idx] == invalid) {
++            continue;  // node missing in the extract
++          }
++          nodes.push_back(lats[idx]);
++          nodes.push_back(lons[idx]);
++          if (!inside && opts.area.contains(QPointF(lons[idx] / 1e7, lats[idx] / 1e7))) {
++            inside = true;
++          }
++        }
++        const qint64 n = qint64(nodes.size() / 2);
++        if (n < 2 || !inside) {
++          continue;
++        }
++        stats.ways++;
++        stats.nodes += n;
++
++        // chunks share their boundary node, so sampling them one by one equals sampling the way
++        for (qint64 start = 0; start < n - 1 && error.isEmpty(); start += opts.chunkSegments) {
++          const qint64 end = qMin<qint64>(start + opts.chunkSegments, n - 1);
++          QByteArray blob((end - start + 1) * 2 * sizeof(qint32), Qt::Uninitialized);
++          qint32 cMinLat = std::numeric_limits<qint32>::max(), cMaxLat = invalid;
++          qint32 cMinLon = std::numeric_limits<qint32>::max(), cMaxLon = invalid;
++          for (qint64 k = start; k <= end; k++) {
++            const qint32 lat = nodes[2 * k];
++            const qint32 lon = nodes[2 * k + 1];
++            qToLittleEndian<qint32>(lat, blob.data() + (k - start) * 2 * sizeof(qint32));
++            qToLittleEndian<qint32>(lon, blob.data() + ((k - start) * 2 + 1) * sizeof(qint32));
++            cMinLat = qMin(cMinLat, lat);
++            cMaxLat = qMax(cMaxLat, lat);
++            cMinLon = qMin(cMinLon, lon);
++            cMaxLon = qMax(cMaxLon, lon);
++          }
++          minLat = qMin(minLat, cMinLat);
++          maxLat = qMax(maxLat, cMaxLat);
++          minLon = qMin(minLon, cMinLon);
++          maxLon = qMax(maxLon, cMaxLon);
++
++          // ids follow the OSM way order: the lookup breaks ties by them
++          const qint64 id = ++stats.chunks;
++          insertChunk.bindValue(0, id);
++          insertChunk.bindValue(1, wayId[w]);
++          insertChunk.bindValue(2, wayTag[w]);
++          insertChunk.bindValue(3, blob);
++          exec(insertChunk);
++
++          insertIndex.bindValue(0, id);
++          insertIndex.bindValue(1, cMinLat / 1e7);
++          insertIndex.bindValue(2, cMaxLat / 1e7);
++          insertIndex.bindValue(3, cMinLon / 1e7);
++          insertIndex.bindValue(4, cMaxLon / 1e7);
++          exec(insertIndex);
++        }
++      }
++
++      if (error.isEmpty() && stats.chunks == 0) {
++        error = tr("No roads or paths found in %1.").arg(QFileInfo(opts.pbf).fileName());
++      }
++
++      const CPbfReader::header_t& hdr = reader.header();
++      QSqlQuery insertMeta(db);
++      insertMeta.prepare("INSERT INTO meta (key, value) VALUES (?, ?)");
++      const QList<QPair<QString, QString>> meta = {
++          {"schema", QString::number(CSurfaceDb::schemaVersion)},
++          {"name", opts.name},
++          {"source", QFileInfo(opts.pbf).fileName()},
++          {"osmTimestamp", QString::number(hdr.timestamp)},
++          {"created", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
++          {"minLat", QString::number(minLat / 1e7, 'f', 7)},
++          {"maxLat", QString::number(maxLat / 1e7, 'f', 7)},
++          {"minLon", QString::number(minLon / 1e7, 'f', 7)},
++          {"maxLon", QString::number(maxLon / 1e7, 'f', 7)},
++          {"ways", QString::number(stats.ways)},
++          {"chunks", QString::number(stats.chunks)},
++      };
++      for (const QPair<QString, QString>& item : meta) {
++        insertMeta.bindValue(0, item.first);
++        insertMeta.bindValue(1, item.second);
++        exec(insertMeta);
++      }
++
++      if (error.isEmpty()) {
++        db.commit();
++      } else {
++        db.rollback();
++      }
++      insertTag = QSqlQuery();
++      insertChunk = QSqlQuery();
++      insertIndex = QSqlQuery();
++      insertMeta = QSqlQuery();
++      query = QSqlQuery();
++      db.close();
++    }
++  }
++  QSqlDatabase::removeDatabase(connection);
++
++  if (!error.isEmpty()) {
++    QFile::remove(tmpFile);
++    return false;
++  }
++
++  QFile::remove(opts.target);
++  if (!QFile::rename(tmpFile, opts.target)) {
++    error = tr("Failed to write %1.").arg(opts.target);
++    QFile::remove(tmpFile);
++    return false;
++  }
++
++  report(1.0, tr("Done."));
++  return true;
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
+new file mode 100644
+index 0000000..78e67f9
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
+@@ -0,0 +1,74 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEDBBUILDER_H
++#define CSURFACEDBBUILDER_H
++
++#include <QCoreApplication>
++#include <QRectF>
++#include <QString>
++#include <atomic>
++#include <functional>
++
++/**
++   @brief Build a surface database (see CSurfaceDb) from an OpenStreetMap .osm.pbf extract
++
++   Reads the file twice: first all ways with a highway tag, then the locations of their nodes.
++   Memory use is roughly 20 bytes per node of a highway (300 MB for Belgium). Runs in the
++   calling thread; call it from a worker thread and pass a cancel flag.
++ */
++class CSurfaceDbBuilder {
++  Q_DECLARE_TR_FUNCTIONS(CSurfaceDbBuilder)
++ public:
++  struct options_t {
++    QString pbf;     ///< source file
++    QString target;  ///< database file to create (replaced if it exists)
++    QString name;    ///< human readable name of the region
++    QRectF area;     ///< optional: only ways with a node in this area (x = longitude, y = latitude)
++    qint32 chunkSegments = 16;
++  };
++
++  struct stats_t {
++    qint64 ways = 0;
++    qint64 nodes = 0;
++    qint64 chunks = 0;
++    qint64 tags = 0;
++  };
++
++  /// fraction 0..1 and a short description of the current step
++  using fProgress = std::function<void(qreal fraction, const QString& step)>;
++
++  /// the file extension of surface databases
++  static const QString suffix;
++
++  CSurfaceDbBuilder(const options_t& options);
++  virtual ~CSurfaceDbBuilder() = default;
++
++  /// @return false on error or cancel, see errorString()
++  bool build(const fProgress& progress, const std::atomic_bool* cancel = nullptr);
++
++  QString errorString() const { return error; }
++  const stats_t& statistics() const { return stats; }
++
++ private:
++  options_t opts;
++  QString error;
++  stats_t stats;
++};
++
++#endif  // CSURFACEDBBUILDER_H
+diff --git a/src/qmapshack/gis/trk/surface/test/CMakeLists.txt b/src/qmapshack/gis/trk/surface/test/CMakeLists.txt
+new file mode 100644
+index 0000000..09eef42
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/CMakeLists.txt
+@@ -0,0 +1,19 @@
++# Unit tests of the track surface analysis (gis/trk/surface). Enable with -DBUILD_TESTING=ON,
++# run with ctest. test_SurfaceDurbuy needs OSM data outside the repository and skips without it.
++
++set(SURFACE_CORE_SRCS
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CPbfReader.cpp
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CSurface.cpp
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceAnalyzer.cpp
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceDb.cpp
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceDbBuilder.cpp
++)
++
++foreach(TEST_NAME test_CSurface test_CSurfaceDb test_CSurfaceAnalyzer test_SurfaceDurbuy)
++    add_executable(${TEST_NAME} ${TEST_NAME}.cpp ${SURFACE_CORE_SRCS})
++    target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
++    target_link_libraries(${TEST_NAME} PRIVATE qms_options Qt6::Core Qt6::Gui Qt6::Sql Qt6::Test)
++    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
++endforeach()
++
++set_tests_properties(test_SurfaceDurbuy PROPERTIES LABELS "data" TIMEOUT 600)
+diff --git a/src/qmapshack/gis/trk/surface/test/data/classify_cases.tsv b/src/qmapshack/gis/trk/surface/test/data/classify_cases.tsv
+new file mode 100644
+index 0000000..d573802
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/data/classify_cases.tsv
+@@ -0,0 +1,960 @@
++				verhard (aangenomen)	0	?
++	asphalt			asfalt	0	?
++	bricks			klinkers	0	?
++	chipseal			asfalt	0	?
++	cobblestone			kasseien	0	?
++	compacted			verdicht steenslag	1	?
++	concrete			beton	0	?
++	concrete:lanes			betonsporen	0	?
++	concrete:plates			betonplaten	0	?
++	dirt			aarde	2	?
++	earth			aarde	2	?
++	fine_gravel			fijn grind	1	?
++	grass			gras	2	?
++	grass_paver			grasdallen	1	?
++	gravel			grind	1	?
++	ground			natuurlijke bodem	2	?
++	metal			metaal	0	?
++	mud			modder	2	?
++	paved			verhard	0	?
++	paving_stones			klinkers	0	?
++	pebblestone			kiezel	1	?
++	rock			rots	2	?
++	sand			zand	2	?
++	sett			kasseien	0	?
++	stepping_stones			stapstenen	2	?
++	unhewn_cobblestone			kasseien	0	?
++	unpaved			onverhard	2	?
++	weird			verhard (aangenomen)	0	?
++	wood			hout	0	?
++	woodchips			houtsnippers	2	?
++bridleway				onverhard (aangenomen)	2	pad
++bridleway			crossing	onverhard (aangenomen)	2	pad
++bridleway			sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade1		onverhard (aangenomen)	2	pad
++bridleway		grade1	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade1	sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade2		onverhard (aangenomen)	2	pad
++bridleway		grade2	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade2	sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade3		onverhard (aangenomen)	2	pad
++bridleway		grade3	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade3	sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade4		onverhard (aangenomen)	2	pad
++bridleway		grade4	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade4	sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade5		onverhard (aangenomen)	2	pad
++bridleway		grade5	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade5	sidewalk	onverhard (aangenomen)	2	pad
++bridleway		grade9		onverhard (aangenomen)	2	pad
++bridleway		grade9	crossing	onverhard (aangenomen)	2	pad
++bridleway		grade9	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	asphalt			asfalt	0	pad
++bridleway	bricks			klinkers	0	pad
++bridleway	chipseal			asfalt	0	pad
++bridleway	cobblestone			kasseien	0	pad
++bridleway	compacted			verdicht steenslag	1	pad
++bridleway	concrete			beton	0	pad
++bridleway	concrete:lanes			betonsporen	0	pad
++bridleway	concrete:plates			betonplaten	0	pad
++bridleway	dirt			aarde	2	pad
++bridleway	earth			aarde	2	pad
++bridleway	fine_gravel			fijn grind	1	pad
++bridleway	grass			gras	2	pad
++bridleway	grass_paver			grasdallen	1	pad
++bridleway	gravel			grind	1	pad
++bridleway	gravel		crossing	grind	1	pad
++bridleway	gravel		sidewalk	grind	1	pad
++bridleway	gravel	grade1		grind	1	pad
++bridleway	gravel	grade1	crossing	grind	1	pad
++bridleway	gravel	grade1	sidewalk	grind	1	pad
++bridleway	gravel	grade2		grind	1	pad
++bridleway	gravel	grade2	crossing	grind	1	pad
++bridleway	gravel	grade2	sidewalk	grind	1	pad
++bridleway	gravel	grade3		grind	1	pad
++bridleway	gravel	grade3	crossing	grind	1	pad
++bridleway	gravel	grade3	sidewalk	grind	1	pad
++bridleway	gravel	grade4		grind	1	pad
++bridleway	gravel	grade4	crossing	grind	1	pad
++bridleway	gravel	grade4	sidewalk	grind	1	pad
++bridleway	gravel	grade5		grind	1	pad
++bridleway	gravel	grade5	crossing	grind	1	pad
++bridleway	gravel	grade5	sidewalk	grind	1	pad
++bridleway	gravel	grade9		grind	1	pad
++bridleway	gravel	grade9	crossing	grind	1	pad
++bridleway	gravel	grade9	sidewalk	grind	1	pad
++bridleway	ground			natuurlijke bodem	2	pad
++bridleway	metal			metaal	0	pad
++bridleway	mud			modder	2	pad
++bridleway	paved			verhard	0	pad
++bridleway	paving_stones			klinkers	0	pad
++bridleway	pebblestone			kiezel	1	pad
++bridleway	rock			rots	2	pad
++bridleway	sand			zand	2	pad
++bridleway	sett			kasseien	0	pad
++bridleway	stepping_stones			stapstenen	2	pad
++bridleway	unhewn_cobblestone			kasseien	0	pad
++bridleway	unpaved			onverhard	2	pad
++bridleway	weird			onverhard (aangenomen)	2	pad
++bridleway	weird		crossing	onverhard (aangenomen)	2	pad
++bridleway	weird		sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade1		onverhard (aangenomen)	2	pad
++bridleway	weird	grade1	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade1	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade2		onverhard (aangenomen)	2	pad
++bridleway	weird	grade2	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade2	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade3		onverhard (aangenomen)	2	pad
++bridleway	weird	grade3	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade3	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade4		onverhard (aangenomen)	2	pad
++bridleway	weird	grade4	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade4	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade5		onverhard (aangenomen)	2	pad
++bridleway	weird	grade5	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade5	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	weird	grade9		onverhard (aangenomen)	2	pad
++bridleway	weird	grade9	crossing	onverhard (aangenomen)	2	pad
++bridleway	weird	grade9	sidewalk	onverhard (aangenomen)	2	pad
++bridleway	wood			hout	0	pad
++bridleway	woodchips			houtsnippers	2	pad
++construction				verhard (aangenomen)	0	construction
++construction	asphalt			asfalt	0	construction
++construction	bricks			klinkers	0	construction
++construction	chipseal			asfalt	0	construction
++construction	cobblestone			kasseien	0	construction
++construction	compacted			verdicht steenslag	1	construction
++construction	concrete			beton	0	construction
++construction	concrete:lanes			betonsporen	0	construction
++construction	concrete:plates			betonplaten	0	construction
++construction	dirt			aarde	2	construction
++construction	earth			aarde	2	construction
++construction	fine_gravel			fijn grind	1	construction
++construction	grass			gras	2	construction
++construction	grass_paver			grasdallen	1	construction
++construction	gravel			grind	1	construction
++construction	ground			natuurlijke bodem	2	construction
++construction	metal			metaal	0	construction
++construction	mud			modder	2	construction
++construction	paved			verhard	0	construction
++construction	paving_stones			klinkers	0	construction
++construction	pebblestone			kiezel	1	construction
++construction	rock			rots	2	construction
++construction	sand			zand	2	construction
++construction	sett			kasseien	0	construction
++construction	stepping_stones			stapstenen	2	construction
++construction	unhewn_cobblestone			kasseien	0	construction
++construction	unpaved			onverhard	2	construction
++construction	weird			verhard (aangenomen)	0	construction
++construction	wood			hout	0	construction
++construction	woodchips			houtsnippers	2	construction
++cycleway				verhard (aangenomen)	0	fietspad
++cycleway	asphalt			asfalt	0	fietspad
++cycleway	bricks			klinkers	0	fietspad
++cycleway	chipseal			asfalt	0	fietspad
++cycleway	cobblestone			kasseien	0	fietspad
++cycleway	compacted			verdicht steenslag	1	fietspad
++cycleway	concrete			beton	0	fietspad
++cycleway	concrete:lanes			betonsporen	0	fietspad
++cycleway	concrete:plates			betonplaten	0	fietspad
++cycleway	dirt			aarde	2	fietspad
++cycleway	earth			aarde	2	fietspad
++cycleway	fine_gravel			fijn grind	1	fietspad
++cycleway	grass			gras	2	fietspad
++cycleway	grass_paver			grasdallen	1	fietspad
++cycleway	gravel			grind	1	fietspad
++cycleway	ground			natuurlijke bodem	2	fietspad
++cycleway	metal			metaal	0	fietspad
++cycleway	mud			modder	2	fietspad
++cycleway	paved			verhard	0	fietspad
++cycleway	paving_stones			klinkers	0	fietspad
++cycleway	pebblestone			kiezel	1	fietspad
++cycleway	rock			rots	2	fietspad
++cycleway	sand			zand	2	fietspad
++cycleway	sett			kasseien	0	fietspad
++cycleway	stepping_stones			stapstenen	2	fietspad
++cycleway	unhewn_cobblestone			kasseien	0	fietspad
++cycleway	unpaved			onverhard	2	fietspad
++cycleway	weird			verhard (aangenomen)	0	fietspad
++cycleway	wood			hout	0	fietspad
++cycleway	woodchips			houtsnippers	2	fietspad
++footway				onverhard (aangenomen)	2	pad
++footway			crossing	onverhard (aangenomen)	2	pad
++footway			sidewalk	verhard (aangenomen)	0	pad
++footway		grade1		onverhard (aangenomen)	2	pad
++footway		grade1	crossing	onverhard (aangenomen)	2	pad
++footway		grade1	sidewalk	verhard (aangenomen)	0	pad
++footway		grade2		onverhard (aangenomen)	2	pad
++footway		grade2	crossing	onverhard (aangenomen)	2	pad
++footway		grade2	sidewalk	verhard (aangenomen)	0	pad
++footway		grade3		onverhard (aangenomen)	2	pad
++footway		grade3	crossing	onverhard (aangenomen)	2	pad
++footway		grade3	sidewalk	verhard (aangenomen)	0	pad
++footway		grade4		onverhard (aangenomen)	2	pad
++footway		grade4	crossing	onverhard (aangenomen)	2	pad
++footway		grade4	sidewalk	verhard (aangenomen)	0	pad
++footway		grade5		onverhard (aangenomen)	2	pad
++footway		grade5	crossing	onverhard (aangenomen)	2	pad
++footway		grade5	sidewalk	verhard (aangenomen)	0	pad
++footway		grade9		onverhard (aangenomen)	2	pad
++footway		grade9	crossing	onverhard (aangenomen)	2	pad
++footway		grade9	sidewalk	verhard (aangenomen)	0	pad
++footway	asphalt			asfalt	0	pad
++footway	bricks			klinkers	0	pad
++footway	chipseal			asfalt	0	pad
++footway	cobblestone			kasseien	0	pad
++footway	compacted			verdicht steenslag	1	pad
++footway	concrete			beton	0	pad
++footway	concrete:lanes			betonsporen	0	pad
++footway	concrete:plates			betonplaten	0	pad
++footway	dirt			aarde	2	pad
++footway	earth			aarde	2	pad
++footway	fine_gravel			fijn grind	1	pad
++footway	grass			gras	2	pad
++footway	grass_paver			grasdallen	1	pad
++footway	gravel			grind	1	pad
++footway	gravel		crossing	grind	1	pad
++footway	gravel		sidewalk	grind	1	pad
++footway	gravel	grade1		grind	1	pad
++footway	gravel	grade1	crossing	grind	1	pad
++footway	gravel	grade1	sidewalk	grind	1	pad
++footway	gravel	grade2		grind	1	pad
++footway	gravel	grade2	crossing	grind	1	pad
++footway	gravel	grade2	sidewalk	grind	1	pad
++footway	gravel	grade3		grind	1	pad
++footway	gravel	grade3	crossing	grind	1	pad
++footway	gravel	grade3	sidewalk	grind	1	pad
++footway	gravel	grade4		grind	1	pad
++footway	gravel	grade4	crossing	grind	1	pad
++footway	gravel	grade4	sidewalk	grind	1	pad
++footway	gravel	grade5		grind	1	pad
++footway	gravel	grade5	crossing	grind	1	pad
++footway	gravel	grade5	sidewalk	grind	1	pad
++footway	gravel	grade9		grind	1	pad
++footway	gravel	grade9	crossing	grind	1	pad
++footway	gravel	grade9	sidewalk	grind	1	pad
++footway	ground			natuurlijke bodem	2	pad
++footway	metal			metaal	0	pad
++footway	mud			modder	2	pad
++footway	paved			verhard	0	pad
++footway	paving_stones			klinkers	0	pad
++footway	pebblestone			kiezel	1	pad
++footway	rock			rots	2	pad
++footway	sand			zand	2	pad
++footway	sett			kasseien	0	pad
++footway	stepping_stones			stapstenen	2	pad
++footway	unhewn_cobblestone			kasseien	0	pad
++footway	unpaved			onverhard	2	pad
++footway	weird			onverhard (aangenomen)	2	pad
++footway	weird		crossing	onverhard (aangenomen)	2	pad
++footway	weird		sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade1		onverhard (aangenomen)	2	pad
++footway	weird	grade1	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade1	sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade2		onverhard (aangenomen)	2	pad
++footway	weird	grade2	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade2	sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade3		onverhard (aangenomen)	2	pad
++footway	weird	grade3	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade3	sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade4		onverhard (aangenomen)	2	pad
++footway	weird	grade4	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade4	sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade5		onverhard (aangenomen)	2	pad
++footway	weird	grade5	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade5	sidewalk	verhard (aangenomen)	0	pad
++footway	weird	grade9		onverhard (aangenomen)	2	pad
++footway	weird	grade9	crossing	onverhard (aangenomen)	2	pad
++footway	weird	grade9	sidewalk	verhard (aangenomen)	0	pad
++footway	wood			hout	0	pad
++footway	woodchips			houtsnippers	2	pad
++living_street				verhard (aangenomen)	0	straat
++living_street	asphalt			asfalt	0	straat
++living_street	bricks			klinkers	0	straat
++living_street	chipseal			asfalt	0	straat
++living_street	cobblestone			kasseien	0	straat
++living_street	compacted			verdicht steenslag	1	straat
++living_street	concrete			beton	0	straat
++living_street	concrete:lanes			betonsporen	0	straat
++living_street	concrete:plates			betonplaten	0	straat
++living_street	dirt			aarde	2	straat
++living_street	earth			aarde	2	straat
++living_street	fine_gravel			fijn grind	1	straat
++living_street	grass			gras	2	straat
++living_street	grass_paver			grasdallen	1	straat
++living_street	gravel			grind	1	straat
++living_street	ground			natuurlijke bodem	2	straat
++living_street	metal			metaal	0	straat
++living_street	mud			modder	2	straat
++living_street	paved			verhard	0	straat
++living_street	paving_stones			klinkers	0	straat
++living_street	pebblestone			kiezel	1	straat
++living_street	rock			rots	2	straat
++living_street	sand			zand	2	straat
++living_street	sett			kasseien	0	straat
++living_street	stepping_stones			stapstenen	2	straat
++living_street	unhewn_cobblestone			kasseien	0	straat
++living_street	unpaved			onverhard	2	straat
++living_street	weird			verhard (aangenomen)	0	straat
++living_street	wood			hout	0	straat
++living_street	woodchips			houtsnippers	2	straat
++motorway				verhard (aangenomen)	0	motorway
++motorway	asphalt			asfalt	0	motorway
++motorway	bricks			klinkers	0	motorway
++motorway	chipseal			asfalt	0	motorway
++motorway	cobblestone			kasseien	0	motorway
++motorway	compacted			verdicht steenslag	1	motorway
++motorway	concrete			beton	0	motorway
++motorway	concrete:lanes			betonsporen	0	motorway
++motorway	concrete:plates			betonplaten	0	motorway
++motorway	dirt			aarde	2	motorway
++motorway	earth			aarde	2	motorway
++motorway	fine_gravel			fijn grind	1	motorway
++motorway	grass			gras	2	motorway
++motorway	grass_paver			grasdallen	1	motorway
++motorway	gravel			grind	1	motorway
++motorway	ground			natuurlijke bodem	2	motorway
++motorway	metal			metaal	0	motorway
++motorway	mud			modder	2	motorway
++motorway	paved			verhard	0	motorway
++motorway	paving_stones			klinkers	0	motorway
++motorway	pebblestone			kiezel	1	motorway
++motorway	rock			rots	2	motorway
++motorway	sand			zand	2	motorway
++motorway	sett			kasseien	0	motorway
++motorway	stepping_stones			stapstenen	2	motorway
++motorway	unhewn_cobblestone			kasseien	0	motorway
++motorway	unpaved			onverhard	2	motorway
++motorway	weird			verhard (aangenomen)	0	motorway
++motorway	wood			hout	0	motorway
++motorway	woodchips			houtsnippers	2	motorway
++path				onverhard (aangenomen)	2	pad
++path			crossing	onverhard (aangenomen)	2	pad
++path			sidewalk	onverhard (aangenomen)	2	pad
++path		grade1		onverhard (aangenomen)	2	pad
++path		grade1	crossing	onverhard (aangenomen)	2	pad
++path		grade1	sidewalk	onverhard (aangenomen)	2	pad
++path		grade2		onverhard (aangenomen)	2	pad
++path		grade2	crossing	onverhard (aangenomen)	2	pad
++path		grade2	sidewalk	onverhard (aangenomen)	2	pad
++path		grade3		onverhard (aangenomen)	2	pad
++path		grade3	crossing	onverhard (aangenomen)	2	pad
++path		grade3	sidewalk	onverhard (aangenomen)	2	pad
++path		grade4		onverhard (aangenomen)	2	pad
++path		grade4	crossing	onverhard (aangenomen)	2	pad
++path		grade4	sidewalk	onverhard (aangenomen)	2	pad
++path		grade5		onverhard (aangenomen)	2	pad
++path		grade5	crossing	onverhard (aangenomen)	2	pad
++path		grade5	sidewalk	onverhard (aangenomen)	2	pad
++path		grade9		onverhard (aangenomen)	2	pad
++path		grade9	crossing	onverhard (aangenomen)	2	pad
++path		grade9	sidewalk	onverhard (aangenomen)	2	pad
++path	asphalt			asfalt	0	pad
++path	bricks			klinkers	0	pad
++path	chipseal			asfalt	0	pad
++path	cobblestone			kasseien	0	pad
++path	compacted			verdicht steenslag	1	pad
++path	concrete			beton	0	pad
++path	concrete:lanes			betonsporen	0	pad
++path	concrete:plates			betonplaten	0	pad
++path	dirt			aarde	2	pad
++path	earth			aarde	2	pad
++path	fine_gravel			fijn grind	1	pad
++path	grass			gras	2	pad
++path	grass_paver			grasdallen	1	pad
++path	gravel			grind	1	pad
++path	gravel		crossing	grind	1	pad
++path	gravel		sidewalk	grind	1	pad
++path	gravel	grade1		grind	1	pad
++path	gravel	grade1	crossing	grind	1	pad
++path	gravel	grade1	sidewalk	grind	1	pad
++path	gravel	grade2		grind	1	pad
++path	gravel	grade2	crossing	grind	1	pad
++path	gravel	grade2	sidewalk	grind	1	pad
++path	gravel	grade3		grind	1	pad
++path	gravel	grade3	crossing	grind	1	pad
++path	gravel	grade3	sidewalk	grind	1	pad
++path	gravel	grade4		grind	1	pad
++path	gravel	grade4	crossing	grind	1	pad
++path	gravel	grade4	sidewalk	grind	1	pad
++path	gravel	grade5		grind	1	pad
++path	gravel	grade5	crossing	grind	1	pad
++path	gravel	grade5	sidewalk	grind	1	pad
++path	gravel	grade9		grind	1	pad
++path	gravel	grade9	crossing	grind	1	pad
++path	gravel	grade9	sidewalk	grind	1	pad
++path	ground			natuurlijke bodem	2	pad
++path	metal			metaal	0	pad
++path	mud			modder	2	pad
++path	paved			verhard	0	pad
++path	paving_stones			klinkers	0	pad
++path	pebblestone			kiezel	1	pad
++path	rock			rots	2	pad
++path	sand			zand	2	pad
++path	sett			kasseien	0	pad
++path	stepping_stones			stapstenen	2	pad
++path	unhewn_cobblestone			kasseien	0	pad
++path	unpaved			onverhard	2	pad
++path	weird			onverhard (aangenomen)	2	pad
++path	weird		crossing	onverhard (aangenomen)	2	pad
++path	weird		sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade1		onverhard (aangenomen)	2	pad
++path	weird	grade1	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade1	sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade2		onverhard (aangenomen)	2	pad
++path	weird	grade2	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade2	sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade3		onverhard (aangenomen)	2	pad
++path	weird	grade3	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade3	sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade4		onverhard (aangenomen)	2	pad
++path	weird	grade4	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade4	sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade5		onverhard (aangenomen)	2	pad
++path	weird	grade5	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade5	sidewalk	onverhard (aangenomen)	2	pad
++path	weird	grade9		onverhard (aangenomen)	2	pad
++path	weird	grade9	crossing	onverhard (aangenomen)	2	pad
++path	weird	grade9	sidewalk	onverhard (aangenomen)	2	pad
++path	wood			hout	0	pad
++path	woodchips			houtsnippers	2	pad
++pedestrian				verhard (aangenomen)	0	straat
++pedestrian	asphalt			asfalt	0	straat
++pedestrian	bricks			klinkers	0	straat
++pedestrian	chipseal			asfalt	0	straat
++pedestrian	cobblestone			kasseien	0	straat
++pedestrian	compacted			verdicht steenslag	1	straat
++pedestrian	concrete			beton	0	straat
++pedestrian	concrete:lanes			betonsporen	0	straat
++pedestrian	concrete:plates			betonplaten	0	straat
++pedestrian	dirt			aarde	2	straat
++pedestrian	earth			aarde	2	straat
++pedestrian	fine_gravel			fijn grind	1	straat
++pedestrian	grass			gras	2	straat
++pedestrian	grass_paver			grasdallen	1	straat
++pedestrian	gravel			grind	1	straat
++pedestrian	ground			natuurlijke bodem	2	straat
++pedestrian	metal			metaal	0	straat
++pedestrian	mud			modder	2	straat
++pedestrian	paved			verhard	0	straat
++pedestrian	paving_stones			klinkers	0	straat
++pedestrian	pebblestone			kiezel	1	straat
++pedestrian	rock			rots	2	straat
++pedestrian	sand			zand	2	straat
++pedestrian	sett			kasseien	0	straat
++pedestrian	stepping_stones			stapstenen	2	straat
++pedestrian	unhewn_cobblestone			kasseien	0	straat
++pedestrian	unpaved			onverhard	2	straat
++pedestrian	weird			verhard (aangenomen)	0	straat
++pedestrian	wood			hout	0	straat
++pedestrian	woodchips			houtsnippers	2	straat
++platform				verhard (aangenomen)	0	platform
++platform	asphalt			asfalt	0	platform
++platform	bricks			klinkers	0	platform
++platform	chipseal			asfalt	0	platform
++platform	cobblestone			kasseien	0	platform
++platform	compacted			verdicht steenslag	1	platform
++platform	concrete			beton	0	platform
++platform	concrete:lanes			betonsporen	0	platform
++platform	concrete:plates			betonplaten	0	platform
++platform	dirt			aarde	2	platform
++platform	earth			aarde	2	platform
++platform	fine_gravel			fijn grind	1	platform
++platform	grass			gras	2	platform
++platform	grass_paver			grasdallen	1	platform
++platform	gravel			grind	1	platform
++platform	ground			natuurlijke bodem	2	platform
++platform	metal			metaal	0	platform
++platform	mud			modder	2	platform
++platform	paved			verhard	0	platform
++platform	paving_stones			klinkers	0	platform
++platform	pebblestone			kiezel	1	platform
++platform	rock			rots	2	platform
++platform	sand			zand	2	platform
++platform	sett			kasseien	0	platform
++platform	stepping_stones			stapstenen	2	platform
++platform	unhewn_cobblestone			kasseien	0	platform
++platform	unpaved			onverhard	2	platform
++platform	weird			verhard (aangenomen)	0	platform
++platform	wood			hout	0	platform
++platform	woodchips			houtsnippers	2	platform
++primary				verhard (aangenomen)	0	drukke weg
++primary	asphalt			asfalt	0	drukke weg
++primary	bricks			klinkers	0	drukke weg
++primary	chipseal			asfalt	0	drukke weg
++primary	cobblestone			kasseien	0	drukke weg
++primary	compacted			verdicht steenslag	1	drukke weg
++primary	concrete			beton	0	drukke weg
++primary	concrete:lanes			betonsporen	0	drukke weg
++primary	concrete:plates			betonplaten	0	drukke weg
++primary	dirt			aarde	2	drukke weg
++primary	earth			aarde	2	drukke weg
++primary	fine_gravel			fijn grind	1	drukke weg
++primary	grass			gras	2	drukke weg
++primary	grass_paver			grasdallen	1	drukke weg
++primary	gravel			grind	1	drukke weg
++primary	ground			natuurlijke bodem	2	drukke weg
++primary	metal			metaal	0	drukke weg
++primary	mud			modder	2	drukke weg
++primary	paved			verhard	0	drukke weg
++primary	paving_stones			klinkers	0	drukke weg
++primary	pebblestone			kiezel	1	drukke weg
++primary	rock			rots	2	drukke weg
++primary	sand			zand	2	drukke weg
++primary	sett			kasseien	0	drukke weg
++primary	stepping_stones			stapstenen	2	drukke weg
++primary	unhewn_cobblestone			kasseien	0	drukke weg
++primary	unpaved			onverhard	2	drukke weg
++primary	weird			verhard (aangenomen)	0	drukke weg
++primary	wood			hout	0	drukke weg
++primary	woodchips			houtsnippers	2	drukke weg
++primary_link				verhard (aangenomen)	0	drukke weg
++primary_link	asphalt			asfalt	0	drukke weg
++primary_link	bricks			klinkers	0	drukke weg
++primary_link	chipseal			asfalt	0	drukke weg
++primary_link	cobblestone			kasseien	0	drukke weg
++primary_link	compacted			verdicht steenslag	1	drukke weg
++primary_link	concrete			beton	0	drukke weg
++primary_link	concrete:lanes			betonsporen	0	drukke weg
++primary_link	concrete:plates			betonplaten	0	drukke weg
++primary_link	dirt			aarde	2	drukke weg
++primary_link	earth			aarde	2	drukke weg
++primary_link	fine_gravel			fijn grind	1	drukke weg
++primary_link	grass			gras	2	drukke weg
++primary_link	grass_paver			grasdallen	1	drukke weg
++primary_link	gravel			grind	1	drukke weg
++primary_link	ground			natuurlijke bodem	2	drukke weg
++primary_link	metal			metaal	0	drukke weg
++primary_link	mud			modder	2	drukke weg
++primary_link	paved			verhard	0	drukke weg
++primary_link	paving_stones			klinkers	0	drukke weg
++primary_link	pebblestone			kiezel	1	drukke weg
++primary_link	rock			rots	2	drukke weg
++primary_link	sand			zand	2	drukke weg
++primary_link	sett			kasseien	0	drukke weg
++primary_link	stepping_stones			stapstenen	2	drukke weg
++primary_link	unhewn_cobblestone			kasseien	0	drukke weg
++primary_link	unpaved			onverhard	2	drukke weg
++primary_link	weird			verhard (aangenomen)	0	drukke weg
++primary_link	wood			hout	0	drukke weg
++primary_link	woodchips			houtsnippers	2	drukke weg
++residential				verhard (aangenomen)	0	straat
++residential			crossing	verhard (aangenomen)	0	straat
++residential			sidewalk	verhard (aangenomen)	0	straat
++residential		grade1		verhard (aangenomen)	0	straat
++residential		grade1	crossing	verhard (aangenomen)	0	straat
++residential		grade1	sidewalk	verhard (aangenomen)	0	straat
++residential		grade2		verhard (aangenomen)	0	straat
++residential		grade2	crossing	verhard (aangenomen)	0	straat
++residential		grade2	sidewalk	verhard (aangenomen)	0	straat
++residential		grade3		verhard (aangenomen)	0	straat
++residential		grade3	crossing	verhard (aangenomen)	0	straat
++residential		grade3	sidewalk	verhard (aangenomen)	0	straat
++residential		grade4		verhard (aangenomen)	0	straat
++residential		grade4	crossing	verhard (aangenomen)	0	straat
++residential		grade4	sidewalk	verhard (aangenomen)	0	straat
++residential		grade5		verhard (aangenomen)	0	straat
++residential		grade5	crossing	verhard (aangenomen)	0	straat
++residential		grade5	sidewalk	verhard (aangenomen)	0	straat
++residential		grade9		verhard (aangenomen)	0	straat
++residential		grade9	crossing	verhard (aangenomen)	0	straat
++residential		grade9	sidewalk	verhard (aangenomen)	0	straat
++residential	asphalt			asfalt	0	straat
++residential	bricks			klinkers	0	straat
++residential	chipseal			asfalt	0	straat
++residential	cobblestone			kasseien	0	straat
++residential	compacted			verdicht steenslag	1	straat
++residential	concrete			beton	0	straat
++residential	concrete:lanes			betonsporen	0	straat
++residential	concrete:plates			betonplaten	0	straat
++residential	dirt			aarde	2	straat
++residential	earth			aarde	2	straat
++residential	fine_gravel			fijn grind	1	straat
++residential	grass			gras	2	straat
++residential	grass_paver			grasdallen	1	straat
++residential	gravel			grind	1	straat
++residential	gravel		crossing	grind	1	straat
++residential	gravel		sidewalk	grind	1	straat
++residential	gravel	grade1		grind	1	straat
++residential	gravel	grade1	crossing	grind	1	straat
++residential	gravel	grade1	sidewalk	grind	1	straat
++residential	gravel	grade2		grind	1	straat
++residential	gravel	grade2	crossing	grind	1	straat
++residential	gravel	grade2	sidewalk	grind	1	straat
++residential	gravel	grade3		grind	1	straat
++residential	gravel	grade3	crossing	grind	1	straat
++residential	gravel	grade3	sidewalk	grind	1	straat
++residential	gravel	grade4		grind	1	straat
++residential	gravel	grade4	crossing	grind	1	straat
++residential	gravel	grade4	sidewalk	grind	1	straat
++residential	gravel	grade5		grind	1	straat
++residential	gravel	grade5	crossing	grind	1	straat
++residential	gravel	grade5	sidewalk	grind	1	straat
++residential	gravel	grade9		grind	1	straat
++residential	gravel	grade9	crossing	grind	1	straat
++residential	gravel	grade9	sidewalk	grind	1	straat
++residential	ground			natuurlijke bodem	2	straat
++residential	metal			metaal	0	straat
++residential	mud			modder	2	straat
++residential	paved			verhard	0	straat
++residential	paving_stones			klinkers	0	straat
++residential	pebblestone			kiezel	1	straat
++residential	rock			rots	2	straat
++residential	sand			zand	2	straat
++residential	sett			kasseien	0	straat
++residential	stepping_stones			stapstenen	2	straat
++residential	unhewn_cobblestone			kasseien	0	straat
++residential	unpaved			onverhard	2	straat
++residential	weird			verhard (aangenomen)	0	straat
++residential	weird		crossing	verhard (aangenomen)	0	straat
++residential	weird		sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade1		verhard (aangenomen)	0	straat
++residential	weird	grade1	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade1	sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade2		verhard (aangenomen)	0	straat
++residential	weird	grade2	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade2	sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade3		verhard (aangenomen)	0	straat
++residential	weird	grade3	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade3	sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade4		verhard (aangenomen)	0	straat
++residential	weird	grade4	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade4	sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade5		verhard (aangenomen)	0	straat
++residential	weird	grade5	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade5	sidewalk	verhard (aangenomen)	0	straat
++residential	weird	grade9		verhard (aangenomen)	0	straat
++residential	weird	grade9	crossing	verhard (aangenomen)	0	straat
++residential	weird	grade9	sidewalk	verhard (aangenomen)	0	straat
++residential	wood			hout	0	straat
++residential	woodchips			houtsnippers	2	straat
++secondary				verhard (aangenomen)	0	drukke weg
++secondary	asphalt			asfalt	0	drukke weg
++secondary	bricks			klinkers	0	drukke weg
++secondary	chipseal			asfalt	0	drukke weg
++secondary	cobblestone			kasseien	0	drukke weg
++secondary	compacted			verdicht steenslag	1	drukke weg
++secondary	concrete			beton	0	drukke weg
++secondary	concrete:lanes			betonsporen	0	drukke weg
++secondary	concrete:plates			betonplaten	0	drukke weg
++secondary	dirt			aarde	2	drukke weg
++secondary	earth			aarde	2	drukke weg
++secondary	fine_gravel			fijn grind	1	drukke weg
++secondary	grass			gras	2	drukke weg
++secondary	grass_paver			grasdallen	1	drukke weg
++secondary	gravel			grind	1	drukke weg
++secondary	ground			natuurlijke bodem	2	drukke weg
++secondary	metal			metaal	0	drukke weg
++secondary	mud			modder	2	drukke weg
++secondary	paved			verhard	0	drukke weg
++secondary	paving_stones			klinkers	0	drukke weg
++secondary	pebblestone			kiezel	1	drukke weg
++secondary	rock			rots	2	drukke weg
++secondary	sand			zand	2	drukke weg
++secondary	sett			kasseien	0	drukke weg
++secondary	stepping_stones			stapstenen	2	drukke weg
++secondary	unhewn_cobblestone			kasseien	0	drukke weg
++secondary	unpaved			onverhard	2	drukke weg
++secondary	weird			verhard (aangenomen)	0	drukke weg
++secondary	wood			hout	0	drukke weg
++secondary	woodchips			houtsnippers	2	drukke weg
++secondary_link				verhard (aangenomen)	0	drukke weg
++secondary_link	asphalt			asfalt	0	drukke weg
++secondary_link	bricks			klinkers	0	drukke weg
++secondary_link	chipseal			asfalt	0	drukke weg
++secondary_link	cobblestone			kasseien	0	drukke weg
++secondary_link	compacted			verdicht steenslag	1	drukke weg
++secondary_link	concrete			beton	0	drukke weg
++secondary_link	concrete:lanes			betonsporen	0	drukke weg
++secondary_link	concrete:plates			betonplaten	0	drukke weg
++secondary_link	dirt			aarde	2	drukke weg
++secondary_link	earth			aarde	2	drukke weg
++secondary_link	fine_gravel			fijn grind	1	drukke weg
++secondary_link	grass			gras	2	drukke weg
++secondary_link	grass_paver			grasdallen	1	drukke weg
++secondary_link	gravel			grind	1	drukke weg
++secondary_link	ground			natuurlijke bodem	2	drukke weg
++secondary_link	metal			metaal	0	drukke weg
++secondary_link	mud			modder	2	drukke weg
++secondary_link	paved			verhard	0	drukke weg
++secondary_link	paving_stones			klinkers	0	drukke weg
++secondary_link	pebblestone			kiezel	1	drukke weg
++secondary_link	rock			rots	2	drukke weg
++secondary_link	sand			zand	2	drukke weg
++secondary_link	sett			kasseien	0	drukke weg
++secondary_link	stepping_stones			stapstenen	2	drukke weg
++secondary_link	unhewn_cobblestone			kasseien	0	drukke weg
++secondary_link	unpaved			onverhard	2	drukke weg
++secondary_link	weird			verhard (aangenomen)	0	drukke weg
++secondary_link	wood			hout	0	drukke weg
++secondary_link	woodchips			houtsnippers	2	drukke weg
++service				verhard (aangenomen)	0	weg
++service	asphalt			asfalt	0	weg
++service	bricks			klinkers	0	weg
++service	chipseal			asfalt	0	weg
++service	cobblestone			kasseien	0	weg
++service	compacted			verdicht steenslag	1	weg
++service	concrete			beton	0	weg
++service	concrete:lanes			betonsporen	0	weg
++service	concrete:plates			betonplaten	0	weg
++service	dirt			aarde	2	weg
++service	earth			aarde	2	weg
++service	fine_gravel			fijn grind	1	weg
++service	grass			gras	2	weg
++service	grass_paver			grasdallen	1	weg
++service	gravel			grind	1	weg
++service	ground			natuurlijke bodem	2	weg
++service	metal			metaal	0	weg
++service	mud			modder	2	weg
++service	paved			verhard	0	weg
++service	paving_stones			klinkers	0	weg
++service	pebblestone			kiezel	1	weg
++service	rock			rots	2	weg
++service	sand			zand	2	weg
++service	sett			kasseien	0	weg
++service	stepping_stones			stapstenen	2	weg
++service	unhewn_cobblestone			kasseien	0	weg
++service	unpaved			onverhard	2	weg
++service	weird			verhard (aangenomen)	0	weg
++service	wood			hout	0	weg
++service	woodchips			houtsnippers	2	weg
++steps				verhard (aangenomen)	0	trap
++steps	asphalt			asfalt	0	trap
++steps	bricks			klinkers	0	trap
++steps	chipseal			asfalt	0	trap
++steps	cobblestone			kasseien	0	trap
++steps	compacted			verdicht steenslag	1	trap
++steps	concrete			beton	0	trap
++steps	concrete:lanes			betonsporen	0	trap
++steps	concrete:plates			betonplaten	0	trap
++steps	dirt			aarde	2	trap
++steps	earth			aarde	2	trap
++steps	fine_gravel			fijn grind	1	trap
++steps	grass			gras	2	trap
++steps	grass_paver			grasdallen	1	trap
++steps	gravel			grind	1	trap
++steps	ground			natuurlijke bodem	2	trap
++steps	metal			metaal	0	trap
++steps	mud			modder	2	trap
++steps	paved			verhard	0	trap
++steps	paving_stones			klinkers	0	trap
++steps	pebblestone			kiezel	1	trap
++steps	rock			rots	2	trap
++steps	sand			zand	2	trap
++steps	sett			kasseien	0	trap
++steps	stepping_stones			stapstenen	2	trap
++steps	unhewn_cobblestone			kasseien	0	trap
++steps	unpaved			onverhard	2	trap
++steps	weird			verhard (aangenomen)	0	trap
++steps	wood			hout	0	trap
++steps	woodchips			houtsnippers	2	trap
++tertiary				verhard (aangenomen)	0	weg
++tertiary	asphalt			asfalt	0	weg
++tertiary	bricks			klinkers	0	weg
++tertiary	chipseal			asfalt	0	weg
++tertiary	cobblestone			kasseien	0	weg
++tertiary	compacted			verdicht steenslag	1	weg
++tertiary	concrete			beton	0	weg
++tertiary	concrete:lanes			betonsporen	0	weg
++tertiary	concrete:plates			betonplaten	0	weg
++tertiary	dirt			aarde	2	weg
++tertiary	earth			aarde	2	weg
++tertiary	fine_gravel			fijn grind	1	weg
++tertiary	grass			gras	2	weg
++tertiary	grass_paver			grasdallen	1	weg
++tertiary	gravel			grind	1	weg
++tertiary	ground			natuurlijke bodem	2	weg
++tertiary	metal			metaal	0	weg
++tertiary	mud			modder	2	weg
++tertiary	paved			verhard	0	weg
++tertiary	paving_stones			klinkers	0	weg
++tertiary	pebblestone			kiezel	1	weg
++tertiary	rock			rots	2	weg
++tertiary	sand			zand	2	weg
++tertiary	sett			kasseien	0	weg
++tertiary	stepping_stones			stapstenen	2	weg
++tertiary	unhewn_cobblestone			kasseien	0	weg
++tertiary	unpaved			onverhard	2	weg
++tertiary	weird			verhard (aangenomen)	0	weg
++tertiary	wood			hout	0	weg
++tertiary	woodchips			houtsnippers	2	weg
++tertiary_link				verhard (aangenomen)	0	weg
++tertiary_link	asphalt			asfalt	0	weg
++tertiary_link	bricks			klinkers	0	weg
++tertiary_link	chipseal			asfalt	0	weg
++tertiary_link	cobblestone			kasseien	0	weg
++tertiary_link	compacted			verdicht steenslag	1	weg
++tertiary_link	concrete			beton	0	weg
++tertiary_link	concrete:lanes			betonsporen	0	weg
++tertiary_link	concrete:plates			betonplaten	0	weg
++tertiary_link	dirt			aarde	2	weg
++tertiary_link	earth			aarde	2	weg
++tertiary_link	fine_gravel			fijn grind	1	weg
++tertiary_link	grass			gras	2	weg
++tertiary_link	grass_paver			grasdallen	1	weg
++tertiary_link	gravel			grind	1	weg
++tertiary_link	ground			natuurlijke bodem	2	weg
++tertiary_link	metal			metaal	0	weg
++tertiary_link	mud			modder	2	weg
++tertiary_link	paved			verhard	0	weg
++tertiary_link	paving_stones			klinkers	0	weg
++tertiary_link	pebblestone			kiezel	1	weg
++tertiary_link	rock			rots	2	weg
++tertiary_link	sand			zand	2	weg
++tertiary_link	sett			kasseien	0	weg
++tertiary_link	stepping_stones			stapstenen	2	weg
++tertiary_link	unhewn_cobblestone			kasseien	0	weg
++tertiary_link	unpaved			onverhard	2	weg
++tertiary_link	weird			verhard (aangenomen)	0	weg
++tertiary_link	wood			hout	0	weg
++tertiary_link	woodchips			houtsnippers	2	weg
++track				onbekend	3	bos-/veldweg
++track			crossing	onbekend	3	bos-/veldweg
++track			sidewalk	onbekend	3	bos-/veldweg
++track		grade1		verhard	0	bos-/veldweg
++track		grade1	crossing	verhard	0	bos-/veldweg
++track		grade1	sidewalk	verhard	0	bos-/veldweg
++track		grade2		halfverhard	1	bos-/veldweg
++track		grade2	crossing	halfverhard	1	bos-/veldweg
++track		grade2	sidewalk	halfverhard	1	bos-/veldweg
++track		grade3		onverhard	2	bos-/veldweg
++track		grade3	crossing	onverhard	2	bos-/veldweg
++track		grade3	sidewalk	onverhard	2	bos-/veldweg
++track		grade4		onverhard	2	bos-/veldweg
++track		grade4	crossing	onverhard	2	bos-/veldweg
++track		grade4	sidewalk	onverhard	2	bos-/veldweg
++track		grade5		onverhard	2	bos-/veldweg
++track		grade5	crossing	onverhard	2	bos-/veldweg
++track		grade5	sidewalk	onverhard	2	bos-/veldweg
++track		grade9		onbekend	3	bos-/veldweg
++track		grade9	crossing	onbekend	3	bos-/veldweg
++track		grade9	sidewalk	onbekend	3	bos-/veldweg
++track	asphalt			asfalt	0	bos-/veldweg
++track	bricks			klinkers	0	bos-/veldweg
++track	chipseal			asfalt	0	bos-/veldweg
++track	cobblestone			kasseien	0	bos-/veldweg
++track	compacted			verdicht steenslag	1	bos-/veldweg
++track	concrete			beton	0	bos-/veldweg
++track	concrete:lanes			betonsporen	0	bos-/veldweg
++track	concrete:plates			betonplaten	0	bos-/veldweg
++track	dirt			aarde	2	bos-/veldweg
++track	earth			aarde	2	bos-/veldweg
++track	fine_gravel			fijn grind	1	bos-/veldweg
++track	grass			gras	2	bos-/veldweg
++track	grass_paver			grasdallen	1	bos-/veldweg
++track	gravel			grind	1	bos-/veldweg
++track	gravel		crossing	grind	1	bos-/veldweg
++track	gravel		sidewalk	grind	1	bos-/veldweg
++track	gravel	grade1		grind	1	bos-/veldweg
++track	gravel	grade1	crossing	grind	1	bos-/veldweg
++track	gravel	grade1	sidewalk	grind	1	bos-/veldweg
++track	gravel	grade2		grind	1	bos-/veldweg
++track	gravel	grade2	crossing	grind	1	bos-/veldweg
++track	gravel	grade2	sidewalk	grind	1	bos-/veldweg
++track	gravel	grade3		grind	1	bos-/veldweg
++track	gravel	grade3	crossing	grind	1	bos-/veldweg
++track	gravel	grade3	sidewalk	grind	1	bos-/veldweg
++track	gravel	grade4		grind	1	bos-/veldweg
++track	gravel	grade4	crossing	grind	1	bos-/veldweg
++track	gravel	grade4	sidewalk	grind	1	bos-/veldweg
++track	gravel	grade5		grind	1	bos-/veldweg
++track	gravel	grade5	crossing	grind	1	bos-/veldweg
++track	gravel	grade5	sidewalk	grind	1	bos-/veldweg
++track	gravel	grade9		grind	1	bos-/veldweg
++track	gravel	grade9	crossing	grind	1	bos-/veldweg
++track	gravel	grade9	sidewalk	grind	1	bos-/veldweg
++track	ground			natuurlijke bodem	2	bos-/veldweg
++track	metal			metaal	0	bos-/veldweg
++track	mud			modder	2	bos-/veldweg
++track	paved			verhard	0	bos-/veldweg
++track	paving_stones			klinkers	0	bos-/veldweg
++track	pebblestone			kiezel	1	bos-/veldweg
++track	rock			rots	2	bos-/veldweg
++track	sand			zand	2	bos-/veldweg
++track	sett			kasseien	0	bos-/veldweg
++track	stepping_stones			stapstenen	2	bos-/veldweg
++track	unhewn_cobblestone			kasseien	0	bos-/veldweg
++track	unpaved			onverhard	2	bos-/veldweg
++track	weird			onbekend	3	bos-/veldweg
++track	weird		crossing	onbekend	3	bos-/veldweg
++track	weird		sidewalk	onbekend	3	bos-/veldweg
++track	weird	grade1		verhard	0	bos-/veldweg
++track	weird	grade1	crossing	verhard	0	bos-/veldweg
++track	weird	grade1	sidewalk	verhard	0	bos-/veldweg
++track	weird	grade2		halfverhard	1	bos-/veldweg
++track	weird	grade2	crossing	halfverhard	1	bos-/veldweg
++track	weird	grade2	sidewalk	halfverhard	1	bos-/veldweg
++track	weird	grade3		onverhard	2	bos-/veldweg
++track	weird	grade3	crossing	onverhard	2	bos-/veldweg
++track	weird	grade3	sidewalk	onverhard	2	bos-/veldweg
++track	weird	grade4		onverhard	2	bos-/veldweg
++track	weird	grade4	crossing	onverhard	2	bos-/veldweg
++track	weird	grade4	sidewalk	onverhard	2	bos-/veldweg
++track	weird	grade5		onverhard	2	bos-/veldweg
++track	weird	grade5	crossing	onverhard	2	bos-/veldweg
++track	weird	grade5	sidewalk	onverhard	2	bos-/veldweg
++track	weird	grade9		onbekend	3	bos-/veldweg
++track	weird	grade9	crossing	onbekend	3	bos-/veldweg
++track	weird	grade9	sidewalk	onbekend	3	bos-/veldweg
++track	wood			hout	0	bos-/veldweg
++track	woodchips			houtsnippers	2	bos-/veldweg
++trunk				verhard (aangenomen)	0	drukke weg
++trunk	asphalt			asfalt	0	drukke weg
++trunk	bricks			klinkers	0	drukke weg
++trunk	chipseal			asfalt	0	drukke weg
++trunk	cobblestone			kasseien	0	drukke weg
++trunk	compacted			verdicht steenslag	1	drukke weg
++trunk	concrete			beton	0	drukke weg
++trunk	concrete:lanes			betonsporen	0	drukke weg
++trunk	concrete:plates			betonplaten	0	drukke weg
++trunk	dirt			aarde	2	drukke weg
++trunk	earth			aarde	2	drukke weg
++trunk	fine_gravel			fijn grind	1	drukke weg
++trunk	grass			gras	2	drukke weg
++trunk	grass_paver			grasdallen	1	drukke weg
++trunk	gravel			grind	1	drukke weg
++trunk	ground			natuurlijke bodem	2	drukke weg
++trunk	metal			metaal	0	drukke weg
++trunk	mud			modder	2	drukke weg
++trunk	paved			verhard	0	drukke weg
++trunk	paving_stones			klinkers	0	drukke weg
++trunk	pebblestone			kiezel	1	drukke weg
++trunk	rock			rots	2	drukke weg
++trunk	sand			zand	2	drukke weg
++trunk	sett			kasseien	0	drukke weg
++trunk	stepping_stones			stapstenen	2	drukke weg
++trunk	unhewn_cobblestone			kasseien	0	drukke weg
++trunk	unpaved			onverhard	2	drukke weg
++trunk	weird			verhard (aangenomen)	0	drukke weg
++trunk	wood			hout	0	drukke weg
++trunk	woodchips			houtsnippers	2	drukke weg
++unclassified				verhard (aangenomen)	0	weg
++unclassified	asphalt			asfalt	0	weg
++unclassified	bricks			klinkers	0	weg
++unclassified	chipseal			asfalt	0	weg
++unclassified	cobblestone			kasseien	0	weg
++unclassified	compacted			verdicht steenslag	1	weg
++unclassified	concrete			beton	0	weg
++unclassified	concrete:lanes			betonsporen	0	weg
++unclassified	concrete:plates			betonplaten	0	weg
++unclassified	dirt			aarde	2	weg
++unclassified	earth			aarde	2	weg
++unclassified	fine_gravel			fijn grind	1	weg
++unclassified	grass			gras	2	weg
++unclassified	grass_paver			grasdallen	1	weg
++unclassified	gravel			grind	1	weg
++unclassified	ground			natuurlijke bodem	2	weg
++unclassified	metal			metaal	0	weg
++unclassified	mud			modder	2	weg
++unclassified	paved			verhard	0	weg
++unclassified	paving_stones			klinkers	0	weg
++unclassified	pebblestone			kiezel	1	weg
++unclassified	rock			rots	2	weg
++unclassified	sand			zand	2	weg
++unclassified	sett			kasseien	0	weg
++unclassified	stepping_stones			stapstenen	2	weg
++unclassified	unhewn_cobblestone			kasseien	0	weg
++unclassified	unpaved			onverhard	2	weg
++unclassified	weird			verhard (aangenomen)	0	weg
++unclassified	wood			hout	0	weg
++unclassified	woodchips			houtsnippers	2	weg
+diff --git a/src/qmapshack/gis/trk/surface/test/data/fixture_cells.tsv b/src/qmapshack/gis/trk/surface/test/data/fixture_cells.tsv
+new file mode 100644
+index 0000000..2c18d5a
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/data/fixture_cells.tsv
+@@ -0,0 +1,377 @@
++49.9989000	5.0050000	asfalt	0	straat
++49.9989000	5.0051000	asfalt	0	straat
++49.9989000	5.0052000	asfalt	0	straat
++49.9990000	5.0050000	asfalt	0	straat
++49.9990000	5.0051000	asfalt	0	straat
++49.9990000	5.0052000	asfalt	0	straat
++49.9991000	5.0050000	asfalt	0	straat
++49.9991000	5.0051000	asfalt	0	straat
++49.9991000	5.0052000	asfalt	0	straat
++49.9992000	5.0050000	asfalt	0	straat
++49.9992000	5.0051000	asfalt	0	straat
++49.9992000	5.0052000	asfalt	0	straat
++49.9993000	5.0050000	asfalt	0	straat
++49.9993000	5.0051000	asfalt	0	straat
++49.9993000	5.0052000	asfalt	0	straat
++49.9994000	5.0050000	asfalt	0	straat
++49.9994000	5.0051000	asfalt	0	straat
++49.9994000	5.0052000	asfalt	0	straat
++49.9995000	5.0050000	asfalt	0	straat
++49.9995000	5.0051000	asfalt	0	straat
++49.9995000	5.0052000	asfalt	0	straat
++49.9996000	5.0050000	asfalt	0	straat
++49.9996000	5.0051000	asfalt	0	straat
++49.9996000	5.0052000	asfalt	0	straat
++49.9997000	5.0050000	asfalt	0	straat
++49.9997000	5.0051000	asfalt	0	straat
++49.9997000	5.0052000	asfalt	0	straat
++49.9998000	5.0050000	asfalt	0	straat
++49.9998000	5.0051000	asfalt	0	straat
++49.9998000	5.0052000	asfalt	0	straat
++49.9999000	5.0050000	asfalt	0	straat
++49.9999000	5.0051000	asfalt	0	straat
++49.9999000	5.0052000	asfalt	0	straat
++50.0000000	4.9999000	halfverhard	1	bos-/veldweg
++50.0000000	5.0000000	halfverhard	1	bos-/veldweg
++50.0000000	5.0001000	halfverhard	1	bos-/veldweg
++50.0000000	5.0002000	halfverhard	1	bos-/veldweg
++50.0000000	5.0003000	halfverhard	1	bos-/veldweg
++50.0000000	5.0004000	halfverhard	1	bos-/veldweg
++50.0000000	5.0005000	halfverhard	1	bos-/veldweg
++50.0000000	5.0006000	halfverhard	1	bos-/veldweg
++50.0000000	5.0007000	halfverhard	1	bos-/veldweg
++50.0000000	5.0008000	halfverhard	1	bos-/veldweg
++50.0000000	5.0009000	halfverhard	1	bos-/veldweg
++50.0000000	5.0010000	halfverhard	1	bos-/veldweg
++50.0000000	5.0011000	halfverhard	1	bos-/veldweg
++50.0000000	5.0012000	halfverhard	1	bos-/veldweg
++50.0000000	5.0013000	halfverhard	1	bos-/veldweg
++50.0000000	5.0014000	halfverhard	1	bos-/veldweg
++50.0000000	5.0015000	halfverhard	1	bos-/veldweg
++50.0000000	5.0016000	halfverhard	1	bos-/veldweg
++50.0000000	5.0017000	halfverhard	1	bos-/veldweg
++50.0000000	5.0018000	halfverhard	1	bos-/veldweg
++50.0000000	5.0019000	halfverhard	1	bos-/veldweg
++50.0000000	5.0020000	halfverhard	1	bos-/veldweg
++50.0000000	5.0021000	halfverhard	1	bos-/veldweg
++50.0000000	5.0022000	halfverhard	1	bos-/veldweg
++50.0000000	5.0023000	halfverhard	1	bos-/veldweg
++50.0000000	5.0024000	halfverhard	1	bos-/veldweg
++50.0000000	5.0025000	halfverhard	1	bos-/veldweg
++50.0000000	5.0026000	halfverhard	1	bos-/veldweg
++50.0000000	5.0027000	halfverhard	1	bos-/veldweg
++50.0000000	5.0028000	halfverhard	1	bos-/veldweg
++50.0000000	5.0029000	halfverhard	1	bos-/veldweg
++50.0000000	5.0030000	halfverhard	1	bos-/veldweg
++50.0000000	5.0031000	halfverhard	1	bos-/veldweg
++50.0000000	5.0032000	halfverhard	1	bos-/veldweg
++50.0000000	5.0033000	halfverhard	1	bos-/veldweg
++50.0000000	5.0034000	halfverhard	1	bos-/veldweg
++50.0000000	5.0035000	halfverhard	1	bos-/veldweg
++50.0000000	5.0036000	halfverhard	1	bos-/veldweg
++50.0000000	5.0037000	halfverhard	1	bos-/veldweg
++50.0000000	5.0038000	halfverhard	1	bos-/veldweg
++50.0000000	5.0039000	halfverhard	1	bos-/veldweg
++50.0000000	5.0040000	halfverhard	1	bos-/veldweg
++50.0000000	5.0041000	halfverhard	1	bos-/veldweg
++50.0000000	5.0042000	halfverhard	1	bos-/veldweg
++50.0000000	5.0043000	halfverhard	1	bos-/veldweg
++50.0000000	5.0044000	halfverhard	1	bos-/veldweg
++50.0000000	5.0045000	halfverhard	1	bos-/veldweg
++50.0000000	5.0046000	halfverhard	1	bos-/veldweg
++50.0000000	5.0047000	halfverhard	1	bos-/veldweg
++50.0000000	5.0048000	halfverhard	1	bos-/veldweg
++50.0000000	5.0049000	halfverhard	1	bos-/veldweg
++50.0000000	5.0050000	halfverhard	1	bos-/veldweg
++50.0000000	5.0051000	halfverhard	1	bos-/veldweg
++50.0000000	5.0052000	halfverhard	1	bos-/veldweg
++50.0000000	5.0053000	halfverhard	1	bos-/veldweg
++50.0000000	5.0054000	halfverhard	1	bos-/veldweg
++50.0000000	5.0055000	halfverhard	1	bos-/veldweg
++50.0000000	5.0056000	halfverhard	1	bos-/veldweg
++50.0000000	5.0057000	halfverhard	1	bos-/veldweg
++50.0000000	5.0058000	halfverhard	1	bos-/veldweg
++50.0000000	5.0059000	halfverhard	1	bos-/veldweg
++50.0000000	5.0060000	halfverhard	1	bos-/veldweg
++50.0000000	5.0061000	halfverhard	1	bos-/veldweg
++50.0000000	5.0062000	halfverhard	1	bos-/veldweg
++50.0000000	5.0063000	halfverhard	1	bos-/veldweg
++50.0000000	5.0064000	halfverhard	1	bos-/veldweg
++50.0000000	5.0065000	halfverhard	1	bos-/veldweg
++50.0000000	5.0066000	halfverhard	1	bos-/veldweg
++50.0000000	5.0067000	halfverhard	1	bos-/veldweg
++50.0000000	5.0068000	halfverhard	1	bos-/veldweg
++50.0000000	5.0069000	halfverhard	1	bos-/veldweg
++50.0000000	5.0070000	halfverhard	1	bos-/veldweg
++50.0000000	5.0071000	halfverhard	1	bos-/veldweg
++50.0000000	5.0072000	halfverhard	1	bos-/veldweg
++50.0000000	5.0073000	halfverhard	1	bos-/veldweg
++50.0000000	5.0074000	halfverhard	1	bos-/veldweg
++50.0000000	5.0075000	halfverhard	1	bos-/veldweg
++50.0000000	5.0076000	halfverhard	1	bos-/veldweg
++50.0000000	5.0077000	halfverhard	1	bos-/veldweg
++50.0000000	5.0078000	halfverhard	1	bos-/veldweg
++50.0000000	5.0079000	halfverhard	1	bos-/veldweg
++50.0000000	5.0080000	halfverhard	1	bos-/veldweg
++50.0000000	5.0081000	halfverhard	1	bos-/veldweg
++50.0000000	5.0082000	halfverhard	1	bos-/veldweg
++50.0000000	5.0083000	halfverhard	1	bos-/veldweg
++50.0000000	5.0084000	halfverhard	1	bos-/veldweg
++50.0000000	5.0085000	halfverhard	1	bos-/veldweg
++50.0000000	5.0086000	halfverhard	1	bos-/veldweg
++50.0000000	5.0087000	halfverhard	1	bos-/veldweg
++50.0000000	5.0088000	halfverhard	1	bos-/veldweg
++50.0000000	5.0089000	halfverhard	1	bos-/veldweg
++50.0000000	5.0090000	halfverhard	1	bos-/veldweg
++50.0000000	5.0091000	halfverhard	1	bos-/veldweg
++50.0000000	5.0092000	halfverhard	1	bos-/veldweg
++50.0000000	5.0093000	halfverhard	1	bos-/veldweg
++50.0000000	5.0094000	halfverhard	1	bos-/veldweg
++50.0000000	5.0095000	halfverhard	1	bos-/veldweg
++50.0000000	5.0096000	halfverhard	1	bos-/veldweg
++50.0000000	5.0097000	halfverhard	1	bos-/veldweg
++50.0000000	5.0098000	halfverhard	1	bos-/veldweg
++50.0000000	5.0099000	halfverhard	1	bos-/veldweg
++50.0000000	5.0100000	halfverhard	1	bos-/veldweg
++50.0000000	5.0101000	halfverhard	1	bos-/veldweg
++50.0001000	5.0050000	asfalt	0	straat
++50.0001000	5.0051000	asfalt	0	straat
++50.0001000	5.0052000	asfalt	0	straat
++50.0002000	5.0050000	asfalt	0	straat
++50.0002000	5.0051000	asfalt	0	straat
++50.0002000	5.0052000	asfalt	0	straat
++50.0003000	5.0050000	asfalt	0	straat
++50.0003000	5.0051000	asfalt	0	straat
++50.0003000	5.0052000	asfalt	0	straat
++50.0004000	5.0050000	asfalt	0	straat
++50.0004000	5.0051000	asfalt	0	straat
++50.0004000	5.0052000	asfalt	0	straat
++50.0005000	5.0050000	asfalt	0	straat
++50.0005000	5.0051000	asfalt	0	straat
++50.0005000	5.0052000	asfalt	0	straat
++50.0006000	5.0050000	asfalt	0	straat
++50.0006000	5.0051000	asfalt	0	straat
++50.0006000	5.0052000	asfalt	0	straat
++50.0007000	5.0050000	asfalt	0	straat
++50.0007000	5.0051000	asfalt	0	straat
++50.0007000	5.0052000	asfalt	0	straat
++50.0008000	5.0050000	asfalt	0	straat
++50.0008000	5.0051000	asfalt	0	straat
++50.0008000	5.0052000	asfalt	0	straat
++50.0009000	5.0050000	asfalt	0	straat
++50.0009000	5.0051000	asfalt	0	straat
++50.0009000	5.0052000	asfalt	0	straat
++50.0010000	5.0050000	asfalt	0	straat
++50.0010000	5.0051000	asfalt	0	straat
++50.0010000	5.0052000	asfalt	0	straat
++50.0011000	5.0050000	asfalt	0	straat
++50.0011000	5.0051000	asfalt	0	straat
++50.0011000	5.0052000	asfalt	0	straat
++50.0012000	5.0050000	asfalt	0	straat
++50.0012000	5.0051000	asfalt	0	straat
++50.0012000	5.0052000	asfalt	0	straat
++50.0013000	5.0050000	asfalt	0	straat
++50.0013000	5.0051000	asfalt	0	straat
++50.0013000	5.0052000	asfalt	0	straat
++50.0014000	5.0050000	asfalt	0	straat
++50.0014000	5.0051000	asfalt	0	straat
++50.0014000	5.0052000	asfalt	0	straat
++50.0015000	5.0050000	asfalt	0	straat
++50.0015000	5.0051000	asfalt	0	straat
++50.0015000	5.0052000	asfalt	0	straat
++50.0016000	5.0050000	asfalt	0	straat
++50.0016000	5.0051000	asfalt	0	straat
++50.0016000	5.0052000	asfalt	0	straat
++50.0017000	5.0050000	asfalt	0	straat
++50.0017000	5.0051000	asfalt	0	straat
++50.0017000	5.0052000	asfalt	0	straat
++50.0018000	5.0050000	asfalt	0	straat
++50.0018000	5.0051000	asfalt	0	straat
++50.0018000	5.0052000	asfalt	0	straat
++50.0019000	5.0050000	asfalt	0	straat
++50.0019000	5.0051000	asfalt	0	straat
++50.0019000	5.0052000	asfalt	0	straat
++50.0020000	4.9999000	onverhard (aangenomen)	2	pad
++50.0020000	5.0000000	onverhard (aangenomen)	2	pad
++50.0020000	5.0001000	onverhard (aangenomen)	2	pad
++50.0020000	5.0002000	onverhard (aangenomen)	2	pad
++50.0020000	5.0003000	onverhard (aangenomen)	2	pad
++50.0020000	5.0004000	onverhard (aangenomen)	2	pad
++50.0020000	5.0005000	onverhard (aangenomen)	2	pad
++50.0020000	5.0006000	onverhard (aangenomen)	2	pad
++50.0020000	5.0007000	onverhard (aangenomen)	2	pad
++50.0020000	5.0008000	onverhard (aangenomen)	2	pad
++50.0020000	5.0009000	onverhard (aangenomen)	2	pad
++50.0020000	5.0010000	onverhard (aangenomen)	2	pad
++50.0020000	5.0011000	onverhard (aangenomen)	2	pad
++50.0020000	5.0012000	onverhard (aangenomen)	2	pad
++50.0020000	5.0013000	onverhard (aangenomen)	2	pad
++50.0020000	5.0014000	onverhard (aangenomen)	2	pad
++50.0020000	5.0015000	onverhard (aangenomen)	2	pad
++50.0020000	5.0016000	onverhard (aangenomen)	2	pad
++50.0020000	5.0017000	onverhard (aangenomen)	2	pad
++50.0020000	5.0018000	onverhard (aangenomen)	2	pad
++50.0020000	5.0019000	onverhard (aangenomen)	2	pad
++50.0020000	5.0020000	onverhard (aangenomen)	2	pad
++50.0020000	5.0021000	onverhard (aangenomen)	2	pad
++50.0020000	5.0022000	onverhard (aangenomen)	2	pad
++50.0020000	5.0023000	onverhard (aangenomen)	2	pad
++50.0020000	5.0024000	onverhard (aangenomen)	2	pad
++50.0020000	5.0025000	onverhard (aangenomen)	2	pad
++50.0020000	5.0026000	onverhard (aangenomen)	2	pad
++50.0020000	5.0027000	onverhard (aangenomen)	2	pad
++50.0020000	5.0028000	onverhard (aangenomen)	2	pad
++50.0020000	5.0029000	onverhard (aangenomen)	2	pad
++50.0020000	5.0030000	onverhard (aangenomen)	2	pad
++50.0020000	5.0031000	onverhard (aangenomen)	2	pad
++50.0020000	5.0032000	onverhard (aangenomen)	2	pad
++50.0020000	5.0033000	onverhard (aangenomen)	2	pad
++50.0020000	5.0034000	onverhard (aangenomen)	2	pad
++50.0020000	5.0035000	onverhard (aangenomen)	2	pad
++50.0020000	5.0036000	onverhard (aangenomen)	2	pad
++50.0020000	5.0037000	onverhard (aangenomen)	2	pad
++50.0020000	5.0038000	onverhard (aangenomen)	2	pad
++50.0020000	5.0039000	onverhard (aangenomen)	2	pad
++50.0020000	5.0040000	onverhard (aangenomen)	2	pad
++50.0020000	5.0041000	onverhard (aangenomen)	2	pad
++50.0020000	5.0042000	onverhard (aangenomen)	2	pad
++50.0020000	5.0043000	onverhard (aangenomen)	2	pad
++50.0020000	5.0044000	onverhard (aangenomen)	2	pad
++50.0020000	5.0045000	onverhard (aangenomen)	2	pad
++50.0020000	5.0046000	onverhard (aangenomen)	2	pad
++50.0020000	5.0047000	onverhard (aangenomen)	2	pad
++50.0020000	5.0048000	onverhard (aangenomen)	2	pad
++50.0020000	5.0049000	onverhard (aangenomen)	2	pad
++50.0020000	5.0050000	onverhard (aangenomen)	2	pad
++50.0020000	5.0051000	onverhard (aangenomen)	2	pad
++50.0020000	5.0052000	onverhard (aangenomen)	2	pad
++50.0020000	5.0053000	onverhard (aangenomen)	2	pad
++50.0020000	5.0054000	onverhard (aangenomen)	2	pad
++50.0020000	5.0055000	onverhard (aangenomen)	2	pad
++50.0020000	5.0056000	onverhard (aangenomen)	2	pad
++50.0020000	5.0057000	onverhard (aangenomen)	2	pad
++50.0020000	5.0058000	onverhard (aangenomen)	2	pad
++50.0020000	5.0059000	onverhard (aangenomen)	2	pad
++50.0020000	5.0060000	onverhard (aangenomen)	2	pad
++50.0020000	5.0061000	onverhard (aangenomen)	2	pad
++50.0020000	5.0062000	onverhard (aangenomen)	2	pad
++50.0020000	5.0063000	onverhard (aangenomen)	2	pad
++50.0020000	5.0064000	onverhard (aangenomen)	2	pad
++50.0020000	5.0065000	onverhard (aangenomen)	2	pad
++50.0020000	5.0066000	onverhard (aangenomen)	2	pad
++50.0020000	5.0067000	onverhard (aangenomen)	2	pad
++50.0020000	5.0068000	onverhard (aangenomen)	2	pad
++50.0020000	5.0069000	onverhard (aangenomen)	2	pad
++50.0020000	5.0070000	onverhard (aangenomen)	2	pad
++50.0020000	5.0071000	onverhard (aangenomen)	2	pad
++50.0020000	5.0072000	onverhard (aangenomen)	2	pad
++50.0020000	5.0073000	onverhard (aangenomen)	2	pad
++50.0020000	5.0074000	onverhard (aangenomen)	2	pad
++50.0020000	5.0075000	onverhard (aangenomen)	2	pad
++50.0020000	5.0076000	onverhard (aangenomen)	2	pad
++50.0020000	5.0077000	onverhard (aangenomen)	2	pad
++50.0020000	5.0078000	onverhard (aangenomen)	2	pad
++50.0020000	5.0079000	onverhard (aangenomen)	2	pad
++50.0020000	5.0080000	onverhard (aangenomen)	2	pad
++50.0020000	5.0081000	onverhard (aangenomen)	2	pad
++50.0020000	5.0082000	onverhard (aangenomen)	2	pad
++50.0020000	5.0083000	onverhard (aangenomen)	2	pad
++50.0020000	5.0084000	onverhard (aangenomen)	2	pad
++50.0020000	5.0085000	onverhard (aangenomen)	2	pad
++50.0020000	5.0086000	onverhard (aangenomen)	2	pad
++50.0020000	5.0087000	onverhard (aangenomen)	2	pad
++50.0020000	5.0088000	onverhard (aangenomen)	2	pad
++50.0020000	5.0089000	onverhard (aangenomen)	2	pad
++50.0020000	5.0090000	onverhard (aangenomen)	2	pad
++50.0020000	5.0091000	onverhard (aangenomen)	2	pad
++50.0020000	5.0092000	onverhard (aangenomen)	2	pad
++50.0020000	5.0093000	onverhard (aangenomen)	2	pad
++50.0020000	5.0094000	onverhard (aangenomen)	2	pad
++50.0020000	5.0095000	onverhard (aangenomen)	2	pad
++50.0020000	5.0096000	onverhard (aangenomen)	2	pad
++50.0020000	5.0097000	onverhard (aangenomen)	2	pad
++50.0020000	5.0098000	onverhard (aangenomen)	2	pad
++50.0020000	5.0099000	onverhard (aangenomen)	2	pad
++50.0020000	5.0100000	onverhard (aangenomen)	2	pad
++50.0020000	5.0101000	onverhard (aangenomen)	2	pad
++50.0021000	5.0050000	asfalt	0	straat
++50.0021000	5.0051000	asfalt	0	straat
++50.0021000	5.0052000	asfalt	0	straat
++50.0022000	5.0050000	asfalt	0	straat
++50.0022000	5.0051000	asfalt	0	straat
++50.0022000	5.0052000	asfalt	0	straat
++50.0023000	5.0050000	asfalt	0	straat
++50.0023000	5.0051000	asfalt	0	straat
++50.0023000	5.0052000	asfalt	0	straat
++50.0024000	5.0050000	asfalt	0	straat
++50.0024000	5.0051000	asfalt	0	straat
++50.0024000	5.0052000	asfalt	0	straat
++50.0025000	5.0050000	asfalt	0	straat
++50.0025000	5.0051000	asfalt	0	straat
++50.0025000	5.0052000	asfalt	0	straat
++50.0026000	5.0050000	asfalt	0	straat
++50.0026000	5.0051000	asfalt	0	straat
++50.0026000	5.0052000	asfalt	0	straat
++50.0027000	5.0050000	asfalt	0	straat
++50.0027000	5.0051000	asfalt	0	straat
++50.0027000	5.0052000	asfalt	0	straat
++50.0028000	5.0050000	asfalt	0	straat
++50.0028000	5.0051000	asfalt	0	straat
++50.0028000	5.0052000	asfalt	0	straat
++50.0029000	5.0050000	asfalt	0	straat
++50.0029000	5.0051000	asfalt	0	straat
++50.0029000	5.0052000	asfalt	0	straat
++50.0030000	5.0050000	asfalt	0	straat
++50.0030000	5.0051000	asfalt	0	straat
++50.0030000	5.0052000	asfalt	0	straat
++50.0069000	4.9999000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0000000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0001000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0002000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0003000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0004000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0005000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0006000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0007000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0008000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0009000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0010000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0011000	verhard (aangenomen)	0	drukke weg
++50.0069000	5.0012000	verhard (aangenomen)	0	drukke weg
++50.0070000	4.9999000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0000000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0001000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0002000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0003000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0004000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0005000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0006000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0007000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0008000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0009000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0010000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0011000	verhard (aangenomen)	0	drukke weg
++50.0070000	5.0012000	verhard (aangenomen)	0	drukke weg
++50.0100000	4.9999000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0000000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0001000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0002000	verhard (aangenomen)	0	trap
++50.0100000	5.0003000	verhard (aangenomen)	0	trap
++50.0100000	5.0004000	verhard (aangenomen)	0	trap
++50.0100000	5.0005000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0006000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0007000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0008000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0009000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0010000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0011000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0012000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0013000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0014000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0015000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0016000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0017000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0018000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0019000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0020000	verhard (aangenomen)	0	fietspad
++50.0100000	5.0021000	verhard (aangenomen)	0	fietspad
+diff --git a/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py b/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
+new file mode 100644
+index 0000000..a58cc91
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
+@@ -0,0 +1,26 @@
++#!/usr/bin/env python3
++"""Generate classify_cases.tsv from the reference classification (osmsurface.py).
++
++Usage: gen_classify_cases.py <dir with osmsurface.py> > classify_cases.tsv
++Columns: highway, surface, tracktype, footway, label (Dutch), class, way type (Dutch).
++"""
++import sys
++
++sys.path.insert(0, sys.argv[1])
++from osmsurface import SURFACE_NL, WEGTYPE, classify  # noqa: E402
++
++highways = sorted(WEGTYPE) + ["", "motorway", "construction", "platform"]
++surfaces = sorted(SURFACE_NL) + ["", "weird"]
++cases = set()
++for hw in highways:
++    for s in surfaces:
++        cases.add((hw, s, "", ""))
++for hw in ("track", "path", "footway", "bridleway", "residential"):
++    for s in ("", "weird", "gravel"):
++        for tt in ("", "grade1", "grade2", "grade3", "grade4", "grade5", "grade9"):
++            for fw in ("", "sidewalk", "crossing"):
++                cases.add((hw, s, tt, fw))
++for hw, s, tt, fw in sorted(cases):
++    tags = {k: v for k, v in (("highway", hw), ("surface", s), ("tracktype", tt), ("footway", fw)) if v}
++    naam, klasse, wegtype = classify(tags)
++    print("\t".join((hw, s, tt, fw, naam, str(klasse), wegtype)))
+diff --git a/src/qmapshack/gis/trk/surface/test/data/make_fixture.py b/src/qmapshack/gis/trk/surface/test/data/make_fixture.py
+new file mode 100644
+index 0000000..5f56d86
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/data/make_fixture.py
+@@ -0,0 +1,76 @@
++#!/usr/bin/env python3
++"""Write fixture.osm.pbf, the small OSM extract the surface unit tests use (needs pyosmium).
++
++Usage: make_fixture.py [<dir with osmsurface.py>]
++With the directory of the reference implementation it also writes fixture_cells.tsv.
++
++Around 50.0 N / 5.0 E:
++  way 10  highway=track tracktype=grade2   along lat 50.0, lon 5.000 .. 5.010
++  way 11  highway=path                     along lat 50.002, lon 5.000 .. 5.010
++  way 12  highway=residential surface=asphalt  along lon 5.005, lat 49.999 .. 50.003
++  way 13  building=yes                     ignored, no highway
++  way 14  highway=primary                  refers to node 999, which is missing
++  way 15  highway=cycleway                 along lat 50.01, lon 5.000 .. 5.002 (one sample cell shared
++  way 16  highway=steps                    with way 16, which is shorter: majority test)
++"""
++import osmium
++from osmium.osm.mutable import Node, Way
++
++out = "fixture.osm.pbf"
++w = osmium.SimpleWriter(out, overwrite=True)
++nodes = {}
++
++
++def node(nid, lat, lon):
++    nodes[nid] = (lat, lon)
++
++
++for i in range(11):  # way 10 and 11, every 0.001 deg (~72 m)
++    node(100 + i, 50.0, 5.0 + i * 0.001)
++    node(200 + i, 50.002, 5.0 + i * 0.001)
++for i in range(5):
++    node(300 + i, 49.999 + i * 0.001, 5.005)
++node(400, 50.005, 5.0)
++node(401, 50.005, 5.0001)
++node(402, 50.0051, 5.0001)
++node(500, 50.007, 5.0)
++node(501, 50.007, 5.001)
++node(600, 50.01, 5.0)
++node(601, 50.01, 5.002)
++node(700, 50.01, 5.0002)
++node(701, 50.01, 5.0004)
++
++for nid in sorted(nodes):
++    lat, lon = nodes[nid]
++    w.add_node(Node(id=nid, location=(lon, lat), tags={}))
++
++w.add_way(Way(id=10, nodes=[100 + i for i in range(11)], tags={"highway": "track", "tracktype": "grade2"}))
++w.add_way(Way(id=11, nodes=[200 + i for i in range(11)], tags={"highway": "path"}))
++w.add_way(Way(id=12, nodes=[300 + i for i in range(5)],
++              tags={"highway": "residential", "surface": "asphalt", "name": "Rue de Test"}))
++w.add_way(Way(id=13, nodes=[400, 401, 402, 400], tags={"building": "yes"}))
++w.add_way(Way(id=14, nodes=[500, 999, 501], tags={"highway": "primary"}))
++w.add_way(Way(id=15, nodes=[600, 601], tags={"highway": "cycleway"}))
++w.add_way(Way(id=16, nodes=[700, 701], tags={"highway": "steps"}))
++w.close()
++
++# Expected cell lookups from the reference implementation, on a grid over the fixture:
++# lat, lon, label (Dutch), class, way type (Dutch); "-" if no way passes the cell.
++import os  # noqa: E402
++import sys  # noqa: E402
++
++if len(sys.argv) > 1:
++    sys.path.insert(0, sys.argv[1])
++    from osmsurface import Surfaces  # noqa: E402
++
++    s = Surfaces(out, 50.005, 5.005, 5)
++    with open("fixture_cells.tsv", "w") as f:
++        for i in range(-10, 141):
++            lat = 49.9985 + i * 0.0001
++            for j in range(-5, 116):
++                lon = 4.9995 + j * 0.0001
++                info = s.at(lat, lon)
++                if info is None:
++                    continue
++                f.write(f"{lat:.7f}\t{lon:.7f}\t{info[0]}\t{info[1]}\t{info[2]}\n")
++    print(os.path.getsize("fixture_cells.tsv"))
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
+new file mode 100644
+index 0000000..3dbfda5
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
+@@ -0,0 +1,167 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include <QFile>
++#include <QHash>
++#include <QSet>
++#include <QtTest>
++
++#include "gis/trk/surface/CSurface.h"
++
++/// Classification must match the reference implementation (osmsurface.py) case by case.
++class test_CSurface : public QObject {
++  Q_OBJECT
++ private slots:
++  void referenceTable_data();
++  void referenceTable();
++  void assumptions();
++  void wayTypes();
++  void namesAndColors();
++};
++
++static const QHash<QString, CSurface::label_e> labelByDutch = {
++    {"asfalt", CSurface::eLabelAsphalt},
++    {"verhard", CSurface::eLabelPaved},
++    {"beton", CSurface::eLabelConcrete},
++    {"betonsporen", CSurface::eLabelConcreteLanes},
++    {"betonplaten", CSurface::eLabelConcretePlates},
++    {"klinkers", CSurface::eLabelPavingStones},
++    {"kasseien", CSurface::eLabelCobblestone},
++    {"metaal", CSurface::eLabelMetal},
++    {"hout", CSurface::eLabelWood},
++    {"verdicht steenslag", CSurface::eLabelCompacted},
++    {"fijn grind", CSurface::eLabelFineGravel},
++    {"grind", CSurface::eLabelGravel},
++    {"kiezel", CSurface::eLabelPebblestone},
++    {"grasdallen", CSurface::eLabelGrassPaver},
++    {"halfverhard", CSurface::eLabelSemiPaved},
++    {"onverhard", CSurface::eLabelUnpaved},
++    {"aarde", CSurface::eLabelDirt},
++    {"natuurlijke bodem", CSurface::eLabelGround},
++    {"gras", CSurface::eLabelGrass},
++    {"modder", CSurface::eLabelMud},
++    {"zand", CSurface::eLabelSand},
++    {"houtsnippers", CSurface::eLabelWoodchips},
++    {"rots", CSurface::eLabelRock},
++    {"stapstenen", CSurface::eLabelSteppingStones},
++    {"verhard (aangenomen)", CSurface::eLabelPavedAssumed},
++    {"onverhard (aangenomen)", CSurface::eLabelUnpavedAssumed},
++    {"onbekend", CSurface::eLabelUnknown},
++};
++
++static const QHash<QString, CSurface::waytype_e> wayByDutch = {
++    {"pad", CSurface::eWayPath},
++    {"bos-/veldweg", CSurface::eWayTrack},
++    {"fietspad", CSurface::eWayCycleway},
++    {"trap", CSurface::eWaySteps},
++    {"straat", CSurface::eWayStreet},
++    {"weg", CSurface::eWayRoad},
++    {"drukke weg", CSurface::eWayBusyRoad},
++};
++
++void test_CSurface::referenceTable_data() {
++  QTest::addColumn<QString>("highway");
++  QTest::addColumn<QString>("surface");
++  QTest::addColumn<QString>("tracktype");
++  QTest::addColumn<QString>("footway");
++  QTest::addColumn<QString>("label");
++  QTest::addColumn<int>("cls");
++  QTest::addColumn<QString>("way");
++
++  QFile file(QFINDTESTDATA("data/classify_cases.tsv"));
++  QVERIFY(file.open(QIODevice::ReadOnly));
++  int rows = 0;
++  while (!file.atEnd()) {
++    const QStringList cols = QString::fromUtf8(file.readLine()).chopped(1).split('\t');
++    QCOMPARE(cols.size(), 7);
++    const QString name = QString("%1|%2|%3|%4").arg(cols[0], cols[1], cols[2], cols[3]);
++    QTest::newRow(name.toUtf8()) << cols[0] << cols[1] << cols[2] << cols[3] << cols[4] << cols[5].toInt() << cols[6];
++    rows++;
++  }
++  QVERIFY(rows > 900);
++}
++
++void test_CSurface::referenceTable() {
++  QFETCH(QString, highway);
++  QFETCH(QString, surface);
++  QFETCH(QString, tracktype);
++  QFETCH(QString, footway);
++  QFETCH(QString, label);
++  QFETCH(int, cls);
++  QFETCH(QString, way);
++
++  const CSurface::info_t info = CSurface::classify({highway, surface, tracktype, footway});
++
++  QVERIFY2(labelByDutch.contains(label), qPrintable(label));
++  QCOMPARE(info.label, labelByDutch[label]);
++  QCOMPARE(int(info.cls), cls);
++  QCOMPARE(info.way, wayByDutch.value(way, CSurface::eWayOther));
++}
++
++void test_CSurface::assumptions() {
++  // the cases a walker meets most, spelled out
++  QCOMPARE(CSurface::classify({"track", "", "", ""}).cls, CSurface::eClassUnknown);
++  QCOMPARE(CSurface::classify({"track", "", "grade2", ""}).cls, CSurface::eClassSemiPaved);
++  QCOMPARE(CSurface::classify({"path", "", "", ""}).label, CSurface::eLabelUnpavedAssumed);
++  QCOMPARE(CSurface::classify({"footway", "", "", "sidewalk"}).label, CSurface::eLabelPavedAssumed);
++  QCOMPARE(CSurface::classify({"footway", "", "", ""}).label, CSurface::eLabelUnpavedAssumed);
++  QCOMPARE(CSurface::classify({"residential", "", "", ""}).label, CSurface::eLabelPavedAssumed);
++  // a surface tag always wins over the tracktype
++  QCOMPARE(CSurface::classify({"track", "asphalt", "grade5", ""}).cls, CSurface::eClassPaved);
++  QCOMPARE(CSurface::classify({"primary", "gravel", "", ""}).cls, CSurface::eClassSemiPaved);
++}
++
++void test_CSurface::wayTypes() {
++  QCOMPARE(CSurface::wayType("bridleway"), CSurface::eWayPath);
++  QCOMPARE(CSurface::wayType("trunk"), CSurface::eWayBusyRoad);
++  QCOMPARE(CSurface::wayType("motorway"), CSurface::eWayOther);
++  QCOMPARE(CSurface::wayType(""), CSurface::eWayOther);
++  QCOMPARE(CSurface::noData().way, CSurface::eWayNoData);
++  QCOMPARE(CSurface::noData().cls, CSurface::eClassUnknown);
++}
++
++void test_CSurface::namesAndColors() {
++  QSet<QString> names;
++  QSet<QRgb> colors;
++  for (int i = 0; i < CSurface::eClassCount; i++) {
++    names << CSurface::className(CSurface::class_e(i));
++    colors << CSurface::classColor(CSurface::class_e(i)).rgb();
++  }
++  QCOMPARE(names.size(), int(CSurface::eClassCount));
++  QCOMPARE(colors.size(), int(CSurface::eClassCount));
++
++  names.clear();
++  colors.clear();
++  for (int i = 0; i < CSurface::eWayCount; i++) {
++    names << CSurface::wayTypeName(CSurface::waytype_e(i));
++    colors << CSurface::wayTypeColor(CSurface::waytype_e(i)).rgb();
++  }
++  QCOMPARE(names.size(), int(CSurface::eWayCount));
++  QCOMPARE(colors.size(), int(CSurface::eWayCount));
++
++  names.clear();
++  for (int i = 0; i < CSurface::eLabelCount; i++) {
++    const QString name = CSurface::labelName(CSurface::label_e(i));
++    QVERIFY(!name.isEmpty());
++    names << name;
++  }
++  QCOMPARE(names.size(), int(CSurface::eLabelCount));
++}
++
++QTEST_GUILESS_MAIN(test_CSurface)
++#include "test_CSurface.moc"
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
+new file mode 100644
+index 0000000..cb8526f
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
+@@ -0,0 +1,185 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include <QtTest>
++
++#include "gis/trk/surface/CSurfaceAnalyzer.h"
++#include "gis/trk/surface/CSurfaceDb.h"
++
++/// Sampling, smoothing and aggregation, with a synthetic map instead of a database.
++class test_CSurfaceAnalyzer : public QObject {
++  Q_OBJECT
++ private slots:
++  void emptyTrack();
++  void singlePoint();
++  void straightLineSampling();
++  void segmentsAreNotConnected();
++  void noDataCountsAsUnknown();
++  void smoothingRemovesSingleBlips();
++  void smoothingKeepsLongerParts();
++  void referenceModeUsesStartPoint();
++  void cancel();
++};
++
++namespace {
++const CSurface::info_t asphaltRoad = {CSurface::eLabelAsphalt, CSurface::eClassPaved, CSurface::eWayRoad};
++const CSurface::info_t gravelTrack = {CSurface::eLabelGravel, CSurface::eClassSemiPaved, CSurface::eWayTrack};
++const CSurface::info_t groundPath = {CSurface::eLabelGround, CSurface::eClassUnpaved, CSurface::eWayPath};
++
++// 0.001 deg latitude ~ 111.2 m
++QVector<CSurfaceAnalyzer::point_t> northwards(qreal lat0, int count, qreal step = 0.001) {
++  QVector<CSurfaceAnalyzer::point_t> pts;
++  for (int i = 0; i < count; i++) {
++    pts << CSurfaceAnalyzer::point_t{lat0 + i * step, 5.0, false};
++  }
++  return pts;
++}
++
++qreal sum(const auto& array) {
++  qreal total = 0;
++  for (qreal v : array) {
++    total += v;
++  }
++  return total;
++}
++}  // namespace
++
++void test_CSurfaceAnalyzer::emptyTrack() {
++  const auto result = CSurfaceAnalyzer::analyze({}, [](qreal, qreal) { return asphaltRoad; }, {});
++  QVERIFY(result.valid);
++  QCOMPARE(result.total, 0.0);
++  QCOMPARE(result.samples, 0);
++  QCOMPARE(result.percent(CSurface::eClassPaved), 0.0);
++}
++
++void test_CSurfaceAnalyzer::singlePoint() {
++  const auto result = CSurfaceAnalyzer::analyze(northwards(50, 1), [](qreal, qreal) { return gravelTrack; }, {});
++  QVERIFY(result.valid);
++  QCOMPARE(result.perPoint.size(), 1);
++  QVERIFY(result.perPoint[0] == gravelTrack);
++  QCOMPARE(result.total, 0.0);
++}
++
++void test_CSurfaceAnalyzer::straightLineSampling() {
++  // 1 km north; asphalt south of 50.0034, gravel north of it
++  const auto pts = northwards(50.0, 10, 0.001);
++  int calls = 0;
++  const auto result = CSurfaceAnalyzer::analyze(pts,
++                                                [&](qreal lat, qreal) {
++                                                  calls++;
++                                                  return lat < 50.0034 ? asphaltRoad : gravelTrack;
++                                                },
++                                                {});
++
++  const qreal length = CSurfaceDb::distance(50.0, 5.0, 50.009, 5.0);
++  QVERIFY(qAbs(result.total - length) < 1e-6);
++  QVERIFY(qAbs(sum(result.byClass) - length) < 1e-6);
++  QVERIFY(qAbs(sum(result.byWay) - length) < 1e-6);
++  QVERIFY(qAbs(sum(result.byLabel) - length) < 1e-6);
++
++  // 111 m per segment -> 6 samples of 18.5 m each, plus the end point
++  QCOMPARE(calls, 9 * 6 + 1);
++  QCOMPARE(result.samples, calls);
++  QCOMPARE(result.samplesWithData, calls);
++
++  // three segments and half of the fourth
++  QVERIFY(qAbs(result.byClass[CSurface::eClassPaved] - 3.5 * length / 9) < 1e-6);
++  QVERIFY(qAbs(result.byWay[CSurface::eWayTrack] - 5.5 * length / 9) < 1e-6);
++  QVERIFY(qAbs(result.byLabel[CSurface::eLabelGravel] - 5.5 * length / 9) < 1e-6);
++  QVERIFY(qAbs(result.percent(CSurface::eClassPaved) - 350.0 / 9) < 1e-6);
++
++  QCOMPARE(result.perPoint.size(), 10);
++  QVERIFY(result.perPoint[3] == asphaltRoad);
++  QVERIFY(result.perPoint[4] == gravelTrack);
++  QVERIFY(result.perPoint[9] == gravelTrack);
++}
++
++void test_CSurfaceAnalyzer::segmentsAreNotConnected() {
++  auto pts = northwards(50.0, 2);
++  auto second = northwards(50.010, 2);
++  second[0].newSegment = true;
++  pts += second;
++
++  const auto result = CSurfaceAnalyzer::analyze(pts, [](qreal, qreal) { return groundPath; }, {});
++  const qreal length = 2 * CSurfaceDb::distance(50.0, 5.0, 50.001, 5.0);
++  QVERIFY(qAbs(result.total - length) < 1e-6);
++  QCOMPARE(result.perPoint.size(), 4);
++  for (const auto& info : result.perPoint) {
++    QVERIFY(info == groundPath);
++  }
++}
++
++void test_CSurfaceAnalyzer::noDataCountsAsUnknown() {
++  const auto result = CSurfaceAnalyzer::analyze(
++      northwards(50.0, 5),
++      [](qreal lat, qreal) { return lat < 50.0019 ? std::optional<CSurface::info_t>(asphaltRoad) : std::nullopt; }, {});
++  QVERIFY(result.samplesWithData < result.samples);
++  QVERIFY(qAbs(result.percent(CSurface::eClassPaved) - 50) < 1e-6);
++  QVERIFY(qAbs(result.percent(CSurface::eClassUnknown) - 50) < 1e-6);
++  QVERIFY(result.byWay[CSurface::eWayNoData] > 0);
++  QVERIFY(result.perPoint[4] == CSurface::noData());
++}
++
++void test_CSurfaceAnalyzer::smoothingRemovesSingleBlips() {
++  // a crossing road at 50.0021..50.0022 hits exactly one 18.5 m sample
++  auto lookup = [](qreal lat, qreal) { return (lat > 50.0021 && lat < 50.0022) ? asphaltRoad : groundPath; };
++  const auto pts = northwards(50.0, 5);
++
++  CSurfaceAnalyzer::options_t raw;
++  raw.smooth = false;
++  const auto blip = CSurfaceAnalyzer::analyze(pts, lookup, raw);
++  QVERIFY(blip.byClass[CSurface::eClassPaved] > 0);
++
++  const auto smooth = CSurfaceAnalyzer::analyze(pts, lookup, {});
++  QCOMPARE(smooth.byClass[CSurface::eClassPaved], 0.0);
++  QVERIFY(qAbs(smooth.total - blip.total) < 1e-6);
++}
++
++void test_CSurfaceAnalyzer::smoothingKeepsLongerParts() {
++  // three samples on the road are real
++  auto lookup = [](qreal lat, qreal) { return (lat > 50.0021 && lat < 50.0026) ? asphaltRoad : groundPath; };
++  const auto result = CSurfaceAnalyzer::analyze(northwards(50.0, 5), lookup, {});
++  QVERIFY(result.byClass[CSurface::eClassPaved] > 30);
++}
++
++void test_CSurfaceAnalyzer::referenceModeUsesStartPoint() {
++  // sampleDistance 0: each track segment counts for the way at its start point
++  CSurfaceAnalyzer::options_t opts;
++  opts.sampleDistance = 0;
++  opts.smooth = false;
++  int calls = 0;
++  const auto result = CSurfaceAnalyzer::analyze(
++      northwards(50.0, 3),
++      [&](qreal lat, qreal) {
++        calls++;
++        return lat < 50.0005 ? asphaltRoad : gravelTrack;
++      },
++      opts);
++  QCOMPARE(calls, 3);
++  QVERIFY(qAbs(result.percent(CSurface::eClassPaved) - 50) < 1e-6);
++}
++
++void test_CSurfaceAnalyzer::cancel() {
++  std::atomic_bool cancel = true;
++  const auto result =
++      CSurfaceAnalyzer::analyze(northwards(50.0, 5), [](qreal, qreal) { return asphaltRoad; }, {}, &cancel);
++  QVERIFY(!result.valid);
++}
++
++QTEST_GUILESS_MAIN(test_CSurfaceAnalyzer)
++#include "test_CSurfaceAnalyzer.moc"
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
+new file mode 100644
+index 0000000..5c222e2
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
+@@ -0,0 +1,404 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include <QFile>
++#include <QHash>
++#include <QSqlDatabase>
++#include <QSqlQuery>
++#include <QTemporaryDir>
++#include <QtTest>
++
++#include "gis/trk/surface/CPbfReader.h"
++#include "gis/trk/surface/CSurfaceDb.h"
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++
++/// PBF reading, database building and lookups on a tiny hand-made extract (data/make_fixture.py).
++class test_CSurfaceDb : public QObject {
++  Q_OBJECT
++ private slots:
++  void initTestCase();
++  void readerNodesAndWays();
++  void readerRejectsGarbage();
++  void builderStatistics();
++  void builderReportsProgressAndCancels();
++  void builderArea();
++  void builderNoHighways();
++  void metaData();
++  void cellLookupMatchesReference_data();
++  void cellLookupMatchesReference();
++  void chunkingDoesNotMatter();
++  void nearestFallback();
++  void dbSet();
++  void invalidFiles();
++  void distanceAndCells();
++
++ private:
++  QString build(const QString& name, qint32 chunkSegments = 16, const QRectF& area = QRectF());
++
++  QTemporaryDir tmp;
++  QString pbf;
++  QString db;
++};
++
++static QString dutchLabel(const CSurface::info_t& info) {
++  static const QHash<int, QString> names = {
++      {CSurface::eLabelAsphalt, "asfalt"},
++      {CSurface::eLabelSemiPaved, "halfverhard"},
++      {CSurface::eLabelUnpavedAssumed, "onverhard (aangenomen)"},
++      {CSurface::eLabelPavedAssumed, "verhard (aangenomen)"},
++  };
++  return names.value(info.label, "?");
++}
++
++static QString dutchWay(const CSurface::info_t& info) {
++  static const QHash<int, QString> names = {
++      {CSurface::eWayStreet, "straat"},       {CSurface::eWayTrack, "bos-/veldweg"}, {CSurface::eWayPath, "pad"},
++      {CSurface::eWayBusyRoad, "drukke weg"}, {CSurface::eWayCycleway, "fietspad"},  {CSurface::eWaySteps, "trap"},
++  };
++  return names.value(info.way, "?");
++}
++
++QString test_CSurfaceDb::build(const QString& name, qint32 chunkSegments, const QRectF& area) {
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = pbf;
++  opts.target = tmp.filePath(name);
++  opts.name = "Fixture";
++  opts.chunkSegments = chunkSegments;
++  opts.area = area;
++  CSurfaceDbBuilder builder(opts);
++  if (!builder.build(nullptr)) {
++    qWarning() << builder.errorString();
++    return QString();
++  }
++  return opts.target;
++}
++
++void test_CSurfaceDb::initTestCase() {
++  QVERIFY(tmp.isValid());
++  pbf = QFINDTESTDATA("data/fixture.osm.pbf");
++  QVERIFY(!pbf.isEmpty());
++  db = build("fixture.surface.sqlite");
++  QVERIFY(!db.isEmpty());
++}
++
++void test_CSurfaceDb::readerNodesAndWays() {
++  CPbfReader reader(pbf);
++  QVERIFY2(reader.open(), qPrintable(reader.errorString()));
++  QVERIFY(reader.header().requiredFeatures.contains("OsmSchema-V0.6"));
++
++  QHash<qint64, QPair<qint32, qint32>> nodes;
++  QHash<qint64, QStringList> ways;
++  QHash<qint64, QVector<qint64>> refs;
++  QVERIFY(reader.readData(
++      CPbfReader::eNodes | CPbfReader::eWays, [&](qint64 id, qint32 lat, qint32 lon) { nodes[id] = {lat, lon}; },
++      [&](const CPbfReader::way_t& way, const QVector<QByteArray>& strings) {
++        QStringList tags;
++        for (qsizetype i = 0; i < way.keys.size(); i++) {
++          tags << QString::fromUtf8(strings[way.keys[i]] + "=" + strings[way.vals[i]]);
++        }
++        tags.sort();
++        ways[way.id] = tags;
++        refs[way.id] = way.refs;
++      },
++      nullptr));
++
++  QCOMPARE(nodes.size(), 36);
++  QCOMPARE(nodes[100], qMakePair(500000000, 50000000));
++  QCOMPARE(nodes[210], qMakePair(500020000, 50100000));
++  QCOMPARE(nodes[300], qMakePair(499990000, 50050000));
++  QVERIFY(!nodes.contains(999));
++
++  QCOMPARE(ways.size(), 7);
++  QCOMPARE(ways[12], QStringList({"highway=residential", "name=Rue de Test", "surface=asphalt"}));
++  QCOMPARE(ways[13], QStringList({"building=yes"}));
++  QCOMPARE(refs[14], QVector<qint64>({500, 999, 501}));
++  QCOMPARE(refs[10].size(), 11);
++  QCOMPARE(refs[10].last(), 110);
++
++  // only what is asked for
++  int cntNodes = 0, cntWays = 0;
++  QVERIFY(reader.readData(
++      CPbfReader::eWays, [&](qint64, qint32, qint32) { cntNodes++; },
++      [&](const CPbfReader::way_t&, const QVector<QByteArray>&) { cntWays++; }, nullptr));
++  QCOMPARE(cntNodes, 0);
++  QCOMPARE(cntWays, 7);
++}
++
++void test_CSurfaceDb::readerRejectsGarbage() {
++  QFile file(tmp.filePath("garbage.osm.pbf"));
++  QVERIFY(file.open(QIODevice::WriteOnly));
++  file.write(QByteArray("\x00\x00\x00\x05hello world, this is no pbf", 32));
++  file.close();
++  CPbfReader reader(file.fileName());
++  QVERIFY(!reader.open());
++  QVERIFY(!reader.errorString().isEmpty());
++
++  CPbfReader missing(tmp.filePath("does-not-exist.osm.pbf"));
++  QVERIFY(!missing.open());
++
++  // a truncated copy of the fixture fails cleanly
++  QFile src(pbf);
++  QVERIFY(src.open(QIODevice::ReadOnly));
++  const QByteArray data = src.readAll();
++  QFile cut(tmp.filePath("cut.osm.pbf"));
++  QVERIFY(cut.open(QIODevice::WriteOnly));
++  cut.write(data.left(data.size() - 40));
++  cut.close();
++  CPbfReader truncated(cut.fileName());
++  QVERIFY(truncated.open());
++  QVERIFY(!truncated.readData(
++      CPbfReader::eNodes | CPbfReader::eWays, [](qint64, qint32, qint32) {},
++      [](const CPbfReader::way_t&, const QVector<QByteArray>&) {}, nullptr));
++  QVERIFY(!truncated.errorString().isEmpty());
++}
++
++void test_CSurfaceDb::builderStatistics() {
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = pbf;
++  opts.target = tmp.filePath("stats.surface.sqlite");
++  opts.chunkSegments = 4;
++  CSurfaceDbBuilder builder(opts);
++  QVERIFY(builder.build(nullptr));
++  // 6 highways (the building is skipped), way 14 keeps 2 of its 3 nodes
++  QCOMPARE(builder.statistics().ways, 6);
++  QCOMPARE(builder.statistics().nodes, 11 + 11 + 5 + 2 + 2 + 2);
++  QCOMPARE(builder.statistics().tags, 6);
++  // way 10 and 11: 10 segments -> 3 chunks each, way 12: 4 segments -> 1 chunk, 3 single segments
++  QCOMPARE(builder.statistics().chunks, 3 + 3 + 1 + 3);
++  QVERIFY(!QFile::exists(opts.target + ".part"));
++}
++
++void test_CSurfaceDb::builderReportsProgressAndCancels() {
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = pbf;
++  opts.target = tmp.filePath("progress.surface.sqlite");
++  CSurfaceDbBuilder builder(opts);
++  qreal last = -1;
++  bool monotonic = true;
++  QVERIFY(builder.build([&](qreal fraction, const QString&) {
++    monotonic = monotonic && fraction >= last;
++    last = fraction;
++  }));
++  QVERIFY(monotonic);
++  QCOMPARE(last, 1.0);
++
++  std::atomic_bool cancel = true;
++  opts.target = tmp.filePath("canceled.surface.sqlite");
++  CSurfaceDbBuilder canceled(opts);
++  QVERIFY(!canceled.build(nullptr, &cancel));
++  QVERIFY(!canceled.errorString().isEmpty());
++  QVERIFY(!QFile::exists(opts.target));
++  QVERIFY(!QFile::exists(opts.target + ".part"));
++}
++
++void test_CSurfaceDb::builderArea() {
++  // only way 12 has nodes south of 49.9995
++  const QString file = build("area.surface.sqlite", 16, QRectF(QPointF(4.9, 49.99), QPointF(5.1, 49.9995)));
++  QVERIFY(!file.isEmpty());
++  CSurfaceDb surface(file);
++  QVERIFY(surface.isValid());
++  QCOMPARE(surface.chunkCount(), 1);
++  QVERIFY(surface.lookupCell(50.0, 5.005).has_value());
++  QCOMPARE(surface.lookupCell(50.0, 5.005)->label, CSurface::eLabelAsphalt);
++  QVERIFY(!surface.lookupCell(50.002, 5.001).has_value());
++}
++
++void test_CSurfaceDb::builderNoHighways() {
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = pbf;
++  opts.target = tmp.filePath("empty.surface.sqlite");
++  opts.area = QRectF(QPointF(10, 10), QPointF(11, 11));
++  CSurfaceDbBuilder builder(opts);
++  QVERIFY(!builder.build(nullptr));
++  QVERIFY(builder.errorString().contains("fixture.osm.pbf"));
++  QVERIFY(!QFile::exists(opts.target));
++
++  opts.pbf = tmp.filePath("missing.osm.pbf");
++  CSurfaceDbBuilder missing(opts);
++  QVERIFY(!missing.build(nullptr));
++}
++
++void test_CSurfaceDb::metaData() {
++  CSurfaceDb surface(db);
++  QVERIFY2(surface.isValid(), qPrintable(surface.errorString()));
++  QCOMPARE(surface.name(), QString("Fixture"));
++  QCOMPARE(surface.source(), QString("fixture.osm.pbf"));
++  QCOMPARE(surface.filename(), db);
++  QVERIFY(surface.created().isValid());
++  QVERIFY(!surface.osmTimestamp().isValid());  // the fixture has none
++  QCOMPARE(surface.chunkCount(), 6);
++  const QRectF bbox = surface.boundingBox();
++  QCOMPARE(bbox.left(), 5.0);
++  QCOMPARE(bbox.right(), 5.01);
++  QCOMPARE(bbox.top(), 49.999);
++  QCOMPARE(bbox.bottom(), 50.01);
++}
++
++void test_CSurfaceDb::cellLookupMatchesReference_data() {
++  QTest::addColumn<qreal>("lat");
++  QTest::addColumn<qreal>("lon");
++  QTest::addColumn<QString>("expected");
++
++  QHash<QString, QString> reference;
++  QFile file(QFINDTESTDATA("data/fixture_cells.tsv"));
++  QVERIFY(file.open(QIODevice::ReadOnly));
++  while (!file.atEnd()) {
++    const QStringList cols = QString::fromUtf8(file.readLine()).chopped(1).split('\t');
++    reference[cols[0] + " " + cols[1]] = cols[2] + "|" + cols[3] + "|" + cols[4];
++  }
++  QVERIFY(reference.size() > 300);
++
++  // the same grid make_fixture.py queried, empty cells included
++  for (int i = -10; i < 141; i++) {
++    const qreal lat = 49.9985 + i * 0.0001;
++    for (int j = -5; j < 116; j++) {
++      const qreal lon = 4.9995 + j * 0.0001;
++      const QString key = QString("%1 %2").arg(lat, 0, 'f', 7).arg(lon, 0, 'f', 7);
++      QTest::newRow(key.toUtf8()) << lat << lon << reference.value(key, "-");
++    }
++  }
++}
++
++void test_CSurfaceDb::cellLookupMatchesReference() {
++  QFETCH(qreal, lat);
++  QFETCH(qreal, lon);
++  QFETCH(QString, expected);
++
++  static CSurfaceDb* surface = nullptr;
++  if (surface == nullptr) {
++    surface = new CSurfaceDb(db);
++  }
++  const std::optional<CSurface::info_t> info = surface->lookupCell(lat, lon);
++  const QString actual =
++      info ? QString("%1|%2|%3").arg(dutchLabel(*info)).arg(int(info->cls)).arg(dutchWay(*info)) : QString("-");
++  QCOMPARE(actual, expected);
++}
++
++void test_CSurfaceDb::chunkingDoesNotMatter() {
++  const QString file = build("chunk2.surface.sqlite", 2);
++  CSurfaceDb small(file);
++  CSurfaceDb large(db);
++  QVERIFY(small.chunkCount() > large.chunkCount());
++  for (int i = -10; i < 141; i += 3) {
++    for (int j = -5; j < 116; j += 3) {
++      const qreal lat = 49.9985 + i * 0.0001;
++      const qreal lon = 4.9995 + j * 0.0001;
++      const auto a = small.lookupCell(lat, lon);
++      const auto b = large.lookupCell(lat, lon);
++      QCOMPARE(a.has_value(), b.has_value());
++      if (a) {
++        QVERIFY(*a == *b);
++      }
++    }
++  }
++}
++
++void test_CSurfaceDb::nearestFallback() {
++  CSurfaceDb surface(db);
++  // 22 m north of the path (way 11 on lat 50.002): another cell row, but within 25 m
++  const qreal lat = 50.002 + 22 / 111195.0;
++  QVERIFY(!surface.lookupCell(lat, 5.0031).has_value());
++  const auto near = surface.lookupNearest(lat, 5.0031, 25);
++  QVERIFY(near.has_value());
++  QCOMPARE(near->way, CSurface::eWayPath);
++  QVERIFY(!surface.lookupNearest(lat, 5.0031, 20).has_value());
++  QVERIFY(!surface.lookupNearest(lat, 5.0031, 0).has_value());
++
++  // beyond the end of a way the distance is to its end node
++  const auto end = surface.lookupNearest(50.0, 5.0101, 25);
++  QVERIFY(end.has_value());
++  QCOMPARE(end->way, CSurface::eWayTrack);
++  QVERIFY(!surface.lookupNearest(50.0, 5.0105, 25).has_value());
++}
++
++void test_CSurfaceDb::dbSet() {
++  CSurfaceDbSet set({db, tmp.filePath("missing.surface.sqlite")});
++  QVERIFY(!set.isEmpty());
++  QVERIFY(set.covers(QRectF(QPointF(5.004, 50.004), QPointF(5.006, 50.006))));
++  QVERIFY(set.covers(QRectF(QPointF(4.0, 49.0), QPointF(6.0, 51.0))));
++  QVERIFY(!set.covers(QRectF(QPointF(6.0, 51.0), QPointF(6.1, 51.1))));
++
++  QCOMPARE(set.lookup(50.0, 5.0021, 25)->way, CSurface::eWayTrack);
++  // cell miss -> nearest within 25 m
++  QCOMPARE(set.lookup(50.002 + 22 / 111195.0, 5.0031, 25)->way, CSurface::eWayPath);
++  QVERIFY(!set.lookup(50.002 + 22 / 111195.0, 5.0031, 0).has_value());
++  // outside every database
++  QVERIFY(!set.lookup(52.0, 6.0, 25).has_value());
++
++  CSurfaceDbSet empty({});
++  QVERIFY(empty.isEmpty());
++  QVERIFY(!empty.covers(QRectF(QPointF(4.0, 49.0), QPointF(6.0, 51.0))));
++}
++
++void test_CSurfaceDb::invalidFiles() {
++  CSurfaceDb missing(tmp.filePath("nothing-here.surface.sqlite"));
++  QVERIFY(!missing.isValid());
++  QVERIFY(!missing.lookupCell(50, 5).has_value());
++  QVERIFY(!missing.lookupNearest(50, 5, 25).has_value());
++
++  // a SQLite file of another kind
++  const QString other = tmp.filePath("other.sqlite");
++  {
++    QSqlDatabase sql = QSqlDatabase::addDatabase("QSQLITE", "other");
++    sql.setDatabaseName(other);
++    QVERIFY(sql.open());
++    QSqlQuery query(sql);
++    QVERIFY(query.exec("CREATE TABLE foo (bar INTEGER)"));
++    query = QSqlQuery();
++    sql.close();
++  }
++  QSqlDatabase::removeDatabase("other");
++  CSurfaceDb wrong(other);
++  QVERIFY(!wrong.isValid());
++  QVERIFY(!wrong.errorString().isEmpty());
++
++  // a newer schema
++  const QString newer = tmp.filePath("newer.surface.sqlite");
++  QVERIFY(QFile::copy(db, newer));
++  {
++    QSqlDatabase sql = QSqlDatabase::addDatabase("QSQLITE", "newer");
++    sql.setDatabaseName(newer);
++    QVERIFY(sql.open());
++    QSqlQuery query(sql);
++    QVERIFY(query.exec("UPDATE meta SET value = '99' WHERE key = 'schema'"));
++    query = QSqlQuery();
++    sql.close();
++  }
++  QSqlDatabase::removeDatabase("newer");
++  CSurfaceDb future(newer);
++  QVERIFY(!future.isValid());
++  QVERIFY(future.errorString().contains("99"));
++}
++
++void test_CSurfaceDb::distanceAndCells() {
++  // 0.001 deg latitude is ~111 m
++  QVERIFY(qAbs(CSurfaceDb::distance(50.0, 5.0, 50.001, 5.0) - 111.19) < 0.01);
++  QCOMPARE(CSurfaceDb::distance(50.0, 5.0, 50.0, 5.0), 0.0);
++
++  qint64 row, col;
++  CSurfaceDb::cell(50.0, 5.0, row, col);
++  QCOMPARE(row, 275000);
++  QCOMPARE(col, 17500);
++  // half way rounds to even, like Python
++  CSurfaceDb::cell(0.5 / 5500, 1.5 / 3500, row, col);
++  QCOMPARE(row, 0);
++  QCOMPARE(col, 2);
++}
++
++QTEST_GUILESS_MAIN(test_CSurfaceDb)
++#include "test_CSurfaceDb.moc"
+diff --git a/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp b/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
+new file mode 100644
+index 0000000..77a0a31
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
+@@ -0,0 +1,158 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include <QDir>
++#include <QFile>
++#include <QTemporaryDir>
++#include <QXmlStreamReader>
++#include <QtTest>
++
++#include "gis/trk/surface/CSurfaceAnalyzer.h"
++#include "gis/trk/surface/CSurfaceDb.h"
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++
++/**
++   Real-world check against the reference implementation (osmsurface.py / surface.py) on a
++   27.6 km hike near Durbuy, Belgium, with the Geofabrik extract of Belgium.
++
++   Needs data outside the repository, skipped if it is missing:
++     QMS_SURFACE_PBF  belgium-latest.osm.pbf  (default ~/QMapShackData/Routino/src/belgium-latest.osm.pbf)
++     QMS_SURFACE_GPX  the track               (default ~/QMapShackData/GPX/Durbuy/Durbuy-Tohogne_2.gpx)
++     QMS_SURFACE_DB   optional: an existing surface database to use instead of building one
++
++   Reference result for the extract of 2026-10-08 (verhard / halfverhard / onverhard / onbekend):
++   29.12 % / 20.46 % / 44.63 % / 5.79 % of 28.03 km.
++
++   With the reference's method (track points only) the port must give the same numbers. What
++   QMapShack shows samples every 20 m instead, which moves about 2 points from paved to unpaved:
++   the reference counts a whole track segment for the way at its start point, and at a junction
++   that is mostly the through road, also when the segment itself follows a path (e.g. the 229 m
++   path from 50.38738 N 5.47368 E).
++ */
++class test_SurfaceDurbuy : public QObject {
++  Q_OBJECT
++ private slots:
++  void initTestCase();
++  void referenceMode();
++  void defaultMode();
++
++ private:
++  void compare(const CSurfaceAnalyzer::result_t& result, qreal tolerance);
++
++  QTemporaryDir tmp;
++  QString db;
++  QVector<CSurfaceAnalyzer::point_t> points;
++};
++
++static constexpr qreal reference[CSurface::eClassCount] = {29.117401, 20.463965, 44.626584, 5.792051};
++static constexpr qreal toleranceReferenceMode = 0.05;  // percentage points
++static constexpr qreal toleranceDefaultMode = 2.5;
++
++static QString setting(const char* env, const QString& def) {
++  const QString value = qEnvironmentVariable(env);
++  return value.isEmpty() ? def : value;
++}
++
++void test_SurfaceDurbuy::initTestCase() {
++  const QString gpx =
++      setting("QMS_SURFACE_GPX", QDir::home().filePath("QMapShackData/GPX/Durbuy/Durbuy-Tohogne_2.gpx"));
++  const QString pbf =
++      setting("QMS_SURFACE_PBF", QDir::home().filePath("QMapShackData/Routino/src/belgium-latest.osm.pbf"));
++  db = qEnvironmentVariable("QMS_SURFACE_DB");
++
++  QFile file(gpx);
++  if (!file.open(QIODevice::ReadOnly)) {
++    QSKIP(qPrintable("Track not found: " + gpx));
++  }
++
++  // track points only, route points are no part of the track
++  QXmlStreamReader xml(&file);
++  bool newSegment = false;
++  while (!xml.atEnd()) {
++    xml.readNext();
++    if (!xml.isStartElement()) {
++      continue;
++    }
++    if (xml.name() == QLatin1String("trkseg")) {
++      newSegment = true;
++    } else if (xml.name() == QLatin1String("trkpt")) {
++      points << CSurfaceAnalyzer::point_t{xml.attributes().value("lat").toDouble(),
++                                          xml.attributes().value("lon").toDouble(), newSegment};
++      newSegment = false;
++    }
++  }
++  QCOMPARE(points.size(), 480);
++
++  if (db.isEmpty()) {
++    if (!QFile::exists(pbf)) {
++      QSKIP(qPrintable("OSM extract not found: " + pbf));
++    }
++    QVERIFY(tmp.isValid());
++    QRectF area;
++    for (const auto& pt : std::as_const(points)) {
++      area |= QRectF(pt.lon, pt.lat, 1e-9, 1e-9);
++    }
++    CSurfaceDbBuilder::options_t opts;
++    opts.pbf = pbf;
++    opts.target = tmp.filePath("durbuy.surface.sqlite");
++    opts.name = "Durbuy";
++    opts.area = area.adjusted(-0.02, -0.02, 0.02, 0.02);
++    CSurfaceDbBuilder builder(opts);
++    QVERIFY2(builder.build(nullptr), qPrintable(builder.errorString()));
++    db = opts.target;
++  }
++}
++
++void test_SurfaceDurbuy::compare(const CSurfaceAnalyzer::result_t& result, qreal tolerance) {
++  QVERIFY(result.valid);
++  QVERIFY2(qAbs(result.total - 28031.2) < 1, qPrintable(QString::number(result.total)));
++  for (int i = 0; i < CSurface::eClassCount; i++) {
++    qInfo("%-12s %6.2f %% (reference %6.2f %%)", qPrintable(CSurface::className(CSurface::class_e(i))),
++          result.percent(CSurface::class_e(i)), reference[i]);
++  }
++  for (int i = 0; i < CSurface::eClassCount; i++) {
++    const qreal percent = result.percent(CSurface::class_e(i));
++    QVERIFY2(qAbs(percent - reference[i]) <= tolerance,
++             qPrintable(QString("class %1: %2 % vs %3 %").arg(i).arg(percent).arg(reference[i])));
++  }
++}
++
++void test_SurfaceDurbuy::referenceMode() {
++  // the reference's method: track points only, no fallback, no smoothing
++  CSurfaceDbSet set({db});
++  QVERIFY(set.covers(QRectF(QPointF(5.45, 50.34), QPointF(5.51, 50.39))));
++  CSurfaceAnalyzer::options_t opts;
++  opts.sampleDistance = 0;
++  opts.smooth = false;
++  const auto result =
++      CSurfaceAnalyzer::analyze(points, [&](qreal lat, qreal lon) { return set.lookup(lat, lon, 0); }, opts);
++  compare(result, toleranceReferenceMode);
++}
++
++void test_SurfaceDurbuy::defaultMode() {
++  // what QMapShack shows: 20 m samples, nearest way within 25 m, smoothing
++  CSurfaceDbSet set({db});
++  const CSurfaceAnalyzer::options_t opts;
++  const auto result = CSurfaceAnalyzer::analyze(
++      points, [&](qreal lat, qreal lon) { return set.lookup(lat, lon, opts.fallbackDistance); }, opts);
++  compare(result, toleranceDefaultMode);
++  QVERIFY(result.samplesWithData == result.samples);
++}
++
++QTEST_GUILESS_MAIN(test_SurfaceDurbuy)
++#include "test_SurfaceDurbuy.moc"
+diff --git a/src/qms_surfacedb/CMakeLists.txt b/src/qms_surfacedb/CMakeLists.txt
+new file mode 100644
+index 0000000..623555d
+--- /dev/null
++++ b/src/qms_surfacedb/CMakeLists.txt
+@@ -0,0 +1,19 @@
++# qms_surfacedb: build a surface database (see gis/trk/surface) from the command line
++
++set(QMS_SURFACE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../qmapshack/gis/trk/surface)
++
++qt_add_executable(qms_surfacedb
++    main.cpp
++    ${QMS_SURFACE_DIR}/CPbfReader.cpp
++    ${QMS_SURFACE_DIR}/CSurface.cpp
++    ${QMS_SURFACE_DIR}/CSurfaceDb.cpp
++    ${QMS_SURFACE_DIR}/CSurfaceDbBuilder.cpp
++)
++
++target_include_directories(qms_surfacedb PRIVATE ../qmapshack)
++target_compile_definitions(qms_surfacedb PRIVATE
++    "VER_STRING=\"${PROJECT_VERSION}\""
++)
++target_link_libraries(qms_surfacedb PRIVATE qms_options Qt6::Core Qt6::Gui Qt6::Sql)
++
++install(TARGETS qms_surfacedb RUNTIME DESTINATION ${BIN_INSTALL_DIR})
+diff --git a/src/qms_surfacedb/main.cpp b/src/qms_surfacedb/main.cpp
+new file mode 100644
+index 0000000..a634f05
+--- /dev/null
++++ b/src/qms_surfacedb/main.cpp
+@@ -0,0 +1,79 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include <QCommandLineParser>
++#include <QCoreApplication>
++#include <QFileInfo>
++#include <QTextStream>
++
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++
++// Build a QMapShack surface database without the GUI, e.g. next to a Routino database in a script.
++int main(int argc, char** argv) {
++  QCoreApplication app(argc, argv);
++  QCoreApplication::setApplicationName("qms_surfacedb");
++  QCoreApplication::setApplicationVersion(VER_STRING);
++
++  QCommandLineParser parser;
++  parser.setApplicationDescription("Build a QMapShack surface database (<name>." + CSurfaceDbBuilder::suffix +
++                                   ") from an OpenStreetMap extract. Put it in the directory set up in QMapShack's "
++                                   "\"Create Surface Database\" tool.");
++  parser.addHelpOption();
++  parser.addVersionOption();
++  parser.addPositionalArgument("source", "OSM extract (.osm.pbf)");
++  parser.addPositionalArgument("target", "database file to write, e.g. Belgium." + CSurfaceDbBuilder::suffix);
++  QCommandLineOption optName({"n", "name"}, "name of the region (default: from the target file)", "name");
++  QCommandLineOption optQuiet({"q", "quiet"}, "no progress output");
++  parser.addOption(optName);
++  parser.addOption(optQuiet);
++  parser.process(app);
++
++  const QStringList args = parser.positionalArguments();
++  if (args.size() != 2) {
++    parser.showHelp(1);
++  }
++
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = args[0];
++  opts.target = args[1];
++  opts.name = parser.isSet(optName) ? parser.value(optName) : QFileInfo(opts.target).fileName().section('.', 0, 0);
++
++  QTextStream err(stderr);
++  const bool quiet = parser.isSet(optQuiet);
++  int last = -1;
++  CSurfaceDbBuilder builder(opts);
++  const bool ok = builder.build([&](qreal fraction, const QString& step) {
++    const int percent = qRound(fraction * 100);
++    if (!quiet && percent != last) {
++      last = percent;
++      err << "\r" << step << " " << percent << "%   " << Qt::flush;
++    }
++  });
++  if (!quiet) {
++    err << "\n";
++  }
++  if (!ok) {
++    err << "error: " << builder.errorString() << "\n";
++    return 1;
++  }
++  const CSurfaceDbBuilder::stats_t& stats = builder.statistics();
++  if (!quiet) {
++    err << opts.target << ": " << stats.ways << " ways, " << stats.nodes << " nodes, " << stats.chunks << " chunks\n";
++  }
++  return 0;
++}

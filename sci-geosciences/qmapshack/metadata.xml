@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+  <maintainer type="person">
+    <email>gert@pellin.be</email>
+    <name>Gert Pellin</name>
+  </maintainer>
+  <longdescription lang="en">
+  QMapShack with surface analysis: every track shows its surfaces and way
+  types (paved, semi-paved, unpaved; path, track, road, ...) from a surface
+  database built from an OpenStreetMap extract, and tracks can be colored
+  by surface. Otherwise identical to the ::gentoo package.
+  </longdescription>
+  <upstream>
+    <remote-id type="github">Maproom/qmapshack</remote-id>
+  </upstream>
+</pkgmetadata>

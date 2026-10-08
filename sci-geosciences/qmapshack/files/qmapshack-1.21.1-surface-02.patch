@@ -1,0 +1,2450 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gert Pellin <gert@pellin.be>
+Date: Thu, 8 Oct 2026 20:06:30 +0200
+Subject: [PATCH 2/3] Show surfaces and way types of tracks
+
+Every track is analysed in the background (CSurfaceTrk) whenever its
+points change, using the active surface databases (CSurfaceDbManager).
+The track's Info tab shows two stacked bars with legend (surface classes
+and way types, km and %) and a collapsible list of the detailed surfaces,
+or a hint how to build a database if none covers the track.
+
+The results are derived track point data like slope, they are not saved.
+They are offered as color sources "Surface*" and "Way Type*", drawn with
+a fixed color per category, with a matching legend on the map and in the
+Style tab. The track point tooltip names the surface and way type.
+
+Tool -> Create Surface Database opens a tab to build databases from .osm.pbf
+extracts in a worker thread and to choose the active ones. The Routino
+router panel links to it. Dutch translations included.
+---
+ CMakeLists.txt                                |   1 +
+ changelog.txt                                 |   3 +
+ src/qmapshack/CMainWindow.cpp                 |  17 +
+ src/qmapshack/CMainWindow.h                   |   2 +
+ src/qmapshack/CMakeLists.txt                  |  19 +
+ src/qmapshack/IMainWindow.ui                  |  16 +
+ .../gis/rte/router/CRouterRoutino.cpp         |   1 +
+ .../gis/rte/router/IRouterRoutino.ui          |  17 +
+ src/qmapshack/gis/trk/CDetailsTrk.cpp         |  14 +-
+ src/qmapshack/gis/trk/CGisItemTrk.cpp         |  68 +++
+ src/qmapshack/gis/trk/CGisItemTrk.h           |  12 +
+ src/qmapshack/gis/trk/CKnownExtension.cpp     |  23 +-
+ src/qmapshack/gis/trk/CKnownExtension.h       |   5 +
+ src/qmapshack/gis/trk/CTrackData.h            |   3 +
+ src/qmapshack/gis/trk/IDetailsTrk.ui          |  24 +-
+ .../gis/trk/surface/CSurfaceDbManager.cpp     | 139 ++++++
+ .../gis/trk/surface/CSurfaceDbManager.h       |  85 ++++
+ src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp | 174 ++++++++
+ src/qmapshack/gis/trk/surface/CSurfaceTrk.h   |  81 ++++
+ .../gis/trk/surface/CSurfaceWidget.cpp        | 239 ++++++++++
+ .../gis/trk/surface/CSurfaceWidget.h          |  88 ++++
+ src/qmapshack/locale/qmapshack_nl.ts          | 422 ++++++++++++++++++
+ .../tool/CSurfaceDatabaseBuilder.cpp          | 293 ++++++++++++
+ src/qmapshack/tool/CSurfaceDatabaseBuilder.h  |  72 +++
+ src/qmapshack/widgets/CColorLegend.cpp        |  61 ++-
+ src/qmapshack/widgets/CColorLegend.h          |   8 +
+ 26 files changed, 1877 insertions(+), 10 deletions(-)
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceTrk.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceWidget.h
+ create mode 100644 src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
+ create mode 100644 src/qmapshack/tool/CSurfaceDatabaseBuilder.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ba245e4..28cb1ab 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -169,6 +169,7 @@ qms_add_flag_if_supported(-Woverloaded-virtual)
+ ###############################################################################################
+ # Core5Compat provides QTextCodec, which decodes the Garmin codepages QStringConverter cannot.
+ find_package(Qt6 6.8 REQUIRED COMPONENTS
++    Concurrent
+     Core
+     Core5Compat
+     Help
+diff --git a/changelog.txt b/changelog.txt
+index 85d8c92..bbfca53 100644
+--- a/changelog.txt
++++ b/changelog.txt
+@@ -1,3 +1,6 @@
++next
++Add surface analysis: surfaces and way types of tracks from an OpenStreetMap surface database
++
+ V1.21.1
+ [QMS-1212] Update macOS build scripts
+ [QMS-1215] Support MBTiles maps via GDAL's VRT driver on macOS
+diff --git a/src/qmapshack/CMainWindow.cpp b/src/qmapshack/CMainWindow.cpp
+index cd6d4c5..686be7a 100644
+--- a/src/qmapshack/CMainWindow.cpp
++++ b/src/qmapshack/CMainWindow.cpp
+@@ -66,6 +66,7 @@
+ #include "tool/CImportDatabase.h"
+ #include "tool/CMapVrtBuilder.h"
+ #include "tool/CRoutinoDatabaseBuilder.h"
++#include "tool/CSurfaceDatabaseBuilder.h"
+ #include "units/CCoordFormatSetup.h"
+ #include "units/CTimeZoneSetup.h"
+ #include "units/CUnitsSetup.h"
+@@ -222,6 +223,7 @@ CMainWindow::CMainWindow() : id(QRandomGenerator::global()->generate()) {
+   connect(actionLoadView, &QAction::triggered, this, &CMainWindow::slotLoadView);
+   connect(actionClose, &QAction::triggered, this, &CMainWindow::close);
+   connect(actionCreateRoutinoDatabase, &QAction::triggered, this, &CMainWindow::slotCreateRoutinoDatabase);
++  connect(actionCreateSurfaceDatabase, &QAction::triggered, this, &CMainWindow::slotCreateSurfaceDatabase);
+   connect(actionPrintMap, &QAction::triggered, this, &CMainWindow::slotPrintMap);
+   connect(actionTakeScreenshot, &QAction::triggered, this, &CMainWindow::slotTakeScreenshot);
+   connect(actionCloseTab, &QAction::triggered, this, &CMainWindow::slotCloseTab);
+@@ -458,6 +460,7 @@ CMainWindow::CMainWindow() : id(QRandomGenerator::global()->generate()) {
+                       actionClose,
+                       actionCloneMapView,
+                       actionCreateRoutinoDatabase,
++                      actionCreateSurfaceDatabase,
+                       actionPrintMap,
+                       actionTakeScreenshot,
+                       actionSetupCoordFormat,
+@@ -1281,6 +1284,18 @@ void CMainWindow::slotCreateRoutinoDatabase() {
+   addWidgetToTab(widget);
+ }
+ 
++void CMainWindow::slotCreateSurfaceDatabase() {
++  // one tab is enough, it also lists the databases
++  for (int i = 0; i < tabWidget->count(); i++) {
++    if (dynamic_cast<CSurfaceDatabaseBuilder*>(tabWidget->widget(i)) != nullptr) {
++      tabWidget->setCurrentIndex(i);
++      return;
++    }
++  }
++  CSurfaceDatabaseBuilder* widget = new CSurfaceDatabaseBuilder(this);
++  addWidgetToTab(widget);
++}
++
+ void CMainWindow::slotLoadGISData() {
+   SETTINGS;
+   QString path = cfg.value("Paths/lastGisPath", QDir::homePath()).toString();
+@@ -1437,6 +1452,8 @@ void CMainWindow::slotLinkActivated(const QString& link) {
+     slotSetupDemPath();
+   } else if (link == "CreateRoutino") {
+     slotCreateRoutinoDatabase();
++  } else if (link == "CreateSurface") {
++    slotCreateSurfaceDatabase();
+   } else if (link == "BRouterSetup") {
+     CRouterBRouter::self().slotToolSetupClicked();
+   } else if (link == "LoadData") {
+diff --git a/src/qmapshack/CMainWindow.h b/src/qmapshack/CMainWindow.h
+index 1ba45ea..58e4f3d 100644
+--- a/src/qmapshack/CMainWindow.h
++++ b/src/qmapshack/CMainWindow.h
+@@ -134,6 +134,8 @@ class CMainWindow : public QMainWindow, private Ui::IMainWindow {
+   void sigCanvasChange();
+ 
+  public slots:
++  /// open the tool tab to build surface databases
++  void slotCreateSurfaceDatabase();
+   void slotLinkActivated(const QString& link);
+   void slotLinkActivated(const QUrl& url);
+   void slotSetupMapView();
+diff --git a/src/qmapshack/CMakeLists.txt b/src/qmapshack/CMakeLists.txt
+index a384a7d..bad14c9 100644
+--- a/src/qmapshack/CMakeLists.txt
++++ b/src/qmapshack/CMakeLists.txt
+@@ -140,6 +140,14 @@ set( SRCS
+     gis/trk/CTrkToAreaDialog.cpp
+     gis/trk/CTrkToRteDialog.cpp
+     gis/trk/CTrackData.cpp
++    gis/trk/surface/CPbfReader.cpp
++    gis/trk/surface/CSurface.cpp
++    gis/trk/surface/CSurfaceAnalyzer.cpp
++    gis/trk/surface/CSurfaceDb.cpp
++    gis/trk/surface/CSurfaceDbBuilder.cpp
++    gis/trk/surface/CSurfaceDbManager.cpp
++    gis/trk/surface/CSurfaceTrk.cpp
++    gis/trk/surface/CSurfaceWidget.cpp
+     gis/trk/filter/CFilterChangeStartPoint.cpp
+     gis/trk/filter/CFilterDelete.cpp
+     gis/trk/filter/CFilterDeleteExtension.cpp
+@@ -320,6 +328,7 @@ set( SRCS
+     tool/CImportDatabase.cpp
+     tool/CMapVrtBuilder.cpp
+     tool/CRoutinoDatabaseBuilder.cpp
++    tool/CSurfaceDatabaseBuilder.cpp
+     tool/IToolShell.cpp
+     units/CCoordFormatSetup.cpp
+     units/CTimeZoneSetup.cpp
+@@ -526,6 +535,14 @@ set( HDRS
+     gis/trk/CTrkToAreaDialog.h
+     gis/trk/CTrkToRteDialog.h
+     gis/trk/CTrackData.h
++    gis/trk/surface/CPbfReader.h
++    gis/trk/surface/CSurface.h
++    gis/trk/surface/CSurfaceAnalyzer.h
++    gis/trk/surface/CSurfaceDb.h
++    gis/trk/surface/CSurfaceDbBuilder.h
++    gis/trk/surface/CSurfaceDbManager.h
++    gis/trk/surface/CSurfaceTrk.h
++    gis/trk/surface/CSurfaceWidget.h
+     gis/trk/filter/CFilterChangeStartPoint.h
+     gis/trk/filter/CFilterDelete.h
+     gis/trk/filter/CFilterDeleteExtension.h
+@@ -715,6 +732,7 @@ set( HDRS
+     tool/CImportDatabase.h
+     tool/CMapVrtBuilder.h
+     tool/CRoutinoDatabaseBuilder.h
++    tool/CSurfaceDatabaseBuilder.h
+     tool/IToolShell.h
+     units/CCoordFormatSetup.h
+     units/CTimeZoneSetup.h
+@@ -1052,6 +1070,7 @@ target_link_libraries(${APPLICATION_NAME} PRIVATE
+     qms_options
+     svgticonengine
+     Qt6::Widgets
++    Qt6::Concurrent
+     # Nothing includes a QtSvg header: QIcon(":/x.svg") is served by the qsvg image plugin and
+     # the qsvgicon icon engine, both loaded at runtime. Linking the module is what makes
+     # windeployqt/macdeployqt detect and ship those plugins. Linux distros package them anyway.
+diff --git a/src/qmapshack/IMainWindow.ui b/src/qmapshack/IMainWindow.ui
+index 6be9b4d..6ca89a1 100644
+--- a/src/qmapshack/IMainWindow.ui
++++ b/src/qmapshack/IMainWindow.ui
+@@ -143,6 +143,7 @@
+     <addaction name="actionImportDatabase"/>
+     <addaction name="actionVrtBuilder"/>
+     <addaction name="actionCreateRoutinoDatabase"/>
++    <addaction name="actionCreateSurfaceDatabase"/>
+     <addaction name="actionStartQMapTool"/>
+    </widget>
+    <addaction name="menuFile"/>
+@@ -768,6 +769,21 @@
+     <enum>QAction::MenuRole::NoRole</enum>
+    </property>
+   </action>
++  <action name="actionCreateSurfaceDatabase">
++   <property name="icon">
++    <iconset resource="resources.qrc">
++     <normaloff>:/icons/ActFoot.svgt</normaloff>:/icons/ActFoot.svgt</iconset>
++   </property>
++   <property name="text">
++    <string>Create Surface Database</string>
++   </property>
++   <property name="toolTip">
++    <string>Build a database of road and path surfaces from an OpenStreetMap extract, to show the surfaces and way types of tracks.</string>
++   </property>
++   <property name="menuRole">
++    <enum>QAction::MenuRole::NoRole</enum>
++   </property>
++  </action>
+   <action name="actionPrintMap">
+    <property name="icon">
+     <iconset resource="resources.qrc">
+diff --git a/src/qmapshack/gis/rte/router/CRouterRoutino.cpp b/src/qmapshack/gis/rte/router/CRouterRoutino.cpp
+index aae1399..6b1bce4 100644
+--- a/src/qmapshack/gis/rte/router/CRouterRoutino.cpp
++++ b/src/qmapshack/gis/rte/router/CRouterRoutino.cpp
+@@ -103,6 +103,7 @@ CRouterRoutino::CRouterRoutino(QWidget* parent) : IRouter(true, parent) {
+   comboLanguage->addItem(tr("Slovak"), "sk");
+ 
+   connect(toolSetupPaths, &QToolButton::clicked, this, &CRouterRoutino::slotSetupPaths);
++  connect(pushSurface, &QPushButton::clicked, &CMainWindow::self(), &CMainWindow::slotCreateSurfaceDatabase);
+ 
+   SETTINGS;
+   dbPaths = cfg.value("Route/routino/paths", dbPaths).toStringList();
+diff --git a/src/qmapshack/gis/rte/router/IRouterRoutino.ui b/src/qmapshack/gis/rte/router/IRouterRoutino.ui
+index 443212f..e0113ec 100644
+--- a/src/qmapshack/gis/rte/router/IRouterRoutino.ui
++++ b/src/qmapshack/gis/rte/router/IRouterRoutino.ui
+@@ -88,6 +88,23 @@
+      <item row="1" column="1">
+       <widget class="QComboBox" name="comboLanguage"/>
+      </item>
++     <item row="4" column="0">
++      <widget class="QLabel" name="labelSurface">
++       <property name="text">
++        <string>Surface</string>
++       </property>
++      </widget>
++     </item>
++     <item row="4" column="1" colspan="2">
++      <widget class="QPushButton" name="pushSurface">
++       <property name="toolTip">
++        <string>Build surface databases from the same OpenStreetMap extracts, to show the surfaces and way types of tracks.</string>
++       </property>
++       <property name="text">
++        <string>Surface databases...</string>
++       </property>
++      </widget>
++     </item>
+     </layout>
+    </item>
+    <item>
+diff --git a/src/qmapshack/gis/trk/CDetailsTrk.cpp b/src/qmapshack/gis/trk/CDetailsTrk.cpp
+index 159eeac..2a334ef 100644
+--- a/src/qmapshack/gis/trk/CDetailsTrk.cpp
++++ b/src/qmapshack/gis/trk/CDetailsTrk.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <QtWidgets>
+ 
++#include "CMainWindow.h"
+ #include "canvas/CCanvas.h"
+ #include "gis/trk/CEnergyCyclingDialog.h"
+ #include "gis/trk/CKnownExtension.h"
+@@ -147,6 +148,7 @@ CDetailsTrk::CDetailsTrk(CGisItemTrk& trk) : INotifyTrk(CGisItemTrk::eVisualDeta
+   connect(textCmtDesc, &QTextBrowser::anchorClicked, this, &CDetailsTrk::slotLinkActivated);
+ 
+   connect(pushSetActivities, &QPushButton::clicked, this, &CDetailsTrk::slotSetActivities);
++  connect(widgetSurface, &CSurfaceWidget::sigSetup, &CMainWindow::self(), &CMainWindow::slotCreateSurfaceDatabase);
+   connect(toolSetEnergyCycling, &QPushButton::clicked, this, &CDetailsTrk::slotSetEnergyCycling);
+ 
+   connect(lineName, &QLineEdit::textEdited, this, &CDetailsTrk::slotNameChanged);
+@@ -440,6 +442,7 @@ void CDetailsTrk::updateData() {
+   labelTainted->setVisible(trk.isTainted());
+ 
+   labelInfo->setText(trk.getInfo(IGisItem::eFeatureNone));
++  widgetSurface->setData(trk.getSurface());
+   comboColor->setCurrentIndex(trk.getColorIdx());
+   toolLock->setChecked(isReadOnly);
+   labelNogo->setVisible(isNogo);
+@@ -506,12 +509,15 @@ void CDetailsTrk::updateData() {
+   comboColorSource->setCurrentIndex(currentIdx);
+ 
+   QString source = comboColorSource->currentData().toString();
+-  bool enabledColorize = !source.isEmpty() && (source != "activity");
++  bool enabledCategorical = CKnownExtension::isCategorical(source);
++  bool enabledColorize = !source.isEmpty() && (source != "activity") && !enabledCategorical;
+   bool enabledActivity = source == "activity";
+ 
+-  comboColor->setVisible(!(enabledColorize || enabledActivity));
+-  widgetColorLabel->setVisible(enabledColorize);
+-  widgetColorLabel->setEnabled(enabledColorize);
++  comboColor->setVisible(!(enabledColorize || enabledActivity || enabledCategorical));
++  widgetColorLabel->setVisible(enabledColorize || enabledCategorical);
++  widgetColorLabel->setEnabled(enabledColorize || enabledCategorical);
++  widgetColorLabel->setCategories(enabledCategorical ? CColorLegend::categoriesOf(source)
++                                                     : QList<CColorLegend::category_t>());
+   toolLimitAutoStyle->setEnabled(enabledColorize);
+   toolLimitUsrStyle->setEnabled(enabledColorize);
+   toolLimitSysStyle->setEnabled(enabledColorize);
+diff --git a/src/qmapshack/gis/trk/CGisItemTrk.cpp b/src/qmapshack/gis/trk/CGisItemTrk.cpp
+index 0523dfe..b06522c 100644
+--- a/src/qmapshack/gis/trk/CGisItemTrk.cpp
++++ b/src/qmapshack/gis/trk/CGisItemTrk.cpp
+@@ -643,6 +643,13 @@ QString CGisItemTrk::getInfoTrkPt(const CTrackData::trkpt_t& pt) const {
+     str += tr(", Speed: %1%2").arg(val1, unit1);
+   }
+ 
++  if (pt.surfaceClass >= 0) {
++    str += "\n" % tr("Surface: %1 (%2), %3")
++                      .arg(CSurface::labelName(CSurface::label_e(pt.surfaceLabel)),
++                           CSurface::className(CSurface::class_e(pt.surfaceClass)),
++                           CSurface::wayTypeName(CSurface::waytype_e(pt.surfaceWay)));
++  }
++
+   QStringList keys = pt.extensions.keys();
+   keys.sort();
+ 
+@@ -876,6 +883,25 @@ void CGisItemTrk::updateExtremaAndExtensions() {
+   }
+ 
+   existingExtensions.subtract(nonRealExtensions);
++
++  // kept while a new analysis runs, so a chosen color source survives editing the track
++  const CSurfaceTrk::state_e stateSurface = surface->getState();
++  if (stateSurface == CSurfaceTrk::eStateReady || stateSurface == CSurfaceTrk::eStateAnalyzing) {
++    existingExtensions << CKnownExtension::internalSurface << CKnownExtension::internalWayType;
++  }
++}
++
++void CGisItemTrk::updateSurface() {
++  {
++    QMutexLocker lock(&mutexItems);
++    surface->update(trk);
++    updateExtremaAndExtensions();
++  }
++  if (propHandler != nullptr) {
++    propHandler->setupData();
++  }
++  updateVisuals(eVisualAll, "updateSurface()");
++  CCanvas::triggerCompleteUpdate(CCanvas::eRedrawGis);
+ }
+ 
+ void CGisItemTrk::resetInternalData() {
+@@ -1098,6 +1124,7 @@ void CGisItemTrk::deriveSecondaryData() {
+ 
+   activities.update();
+ 
++  surface->update(trk);
+   updateExtremaAndExtensions();
+   // make sure we have a graph properties object by now
+   if (propHandler == nullptr) {
+@@ -1711,6 +1738,8 @@ void CGisItemTrk::drawItem(QPainter& p, const QPolygonF& viewport, QList<QRectF>
+     }
+   } else if (getColorizeSource() == "activity") {
+     drawColorizedByActivity(p);
++  } else if (CKnownExtension::isCategorical(getColorizeSource())) {
++    drawColorizedByCategory(p);
+   } else {
+     drawColorized(p);
+   }
+@@ -1847,6 +1876,39 @@ void CGisItemTrk::drawColorizedByActivity(QPainter& p) const {
+   }
+ }
+ 
++void CGisItemTrk::drawColorizedByCategory(QPainter& p) const {
++  const bool byWay = getColorizeSource() == CKnownExtension::internalWayType;
++  auto colorOf = [byWay](const CTrackData::trkpt_t& pt) {
++    if (byWay) {
++      return pt.surfaceWay < 0 ? QColor(Qt::transparent) : CSurface::wayTypeColor(CSurface::waytype_e(pt.surfaceWay));
++    }
++    return pt.surfaceClass < 0 ? QColor(Qt::transparent) : CSurface::classColor(CSurface::class_e(pt.surfaceClass));
++  };
++
++  QPen pen;
++  pen.setWidth(penWidthFg);
++  pen.setCapStyle(Qt::FlatCap);
++
++  // like the analysis, a stretch belongs to the category at its start point
++  for (const CTrackData::trkseg_t& segment : trk.segs) {
++    const CTrackData::trkpt_t* ptPrev = nullptr;
++    for (const CTrackData::trkpt_t& pt : segment.pts) {
++      if (pt.isHidden()) {
++        continue;
++      }
++      if (ptPrev != nullptr) {
++        const QColor color = colorOf(*ptPrev);
++        if (color.alpha() != 0) {
++          pen.setColor(color);
++          p.setPen(pen);
++          p.drawLine(lineSimple[ptPrev->idxVisible], lineSimple[pt.idxVisible]);
++        }
++      }
++      ptPrev = &pt;
++    }
++  }
++}
++
+ void CGisItemTrk::drawColorized(QPainter& p) const {
+   auto valueFunc = CKnownExtension::get(getColorizeSource()).valueFunc;
+ 
+@@ -1903,10 +1965,16 @@ void CGisItemTrk::drawColorized(QPainter& p) const {
+ }
+ 
+ qreal CGisItemTrk::getMin(const QString& source) const {
++  if (CKnownExtension::isCategorical(source)) {
++    return CKnownExtension::get(source).minimum;
++  }
+   return extrema.value(source).min * CKnownExtension::get(source).factor;
+ }
+ 
+ qreal CGisItemTrk::getMax(const QString& source) const {
++  if (CKnownExtension::isCategorical(source)) {
++    return CKnownExtension::get(source).maximum;
++  }
+   return extrema.value(source).max * CKnownExtension::get(source).factor;
+ }
+ 
+diff --git a/src/qmapshack/gis/trk/CGisItemTrk.h b/src/qmapshack/gis/trk/CGisItemTrk.h
+index afaaa39..57edc70 100644
+--- a/src/qmapshack/gis/trk/CGisItemTrk.h
++++ b/src/qmapshack/gis/trk/CGisItemTrk.h
+@@ -24,6 +24,7 @@
+ #include <QPen>
+ #include <QPointer>
+ #include <functional>
++#include <memory>
+ 
+ #include "gis/IGisItem.h"
+ #include "gis/IGisLine.h"
+@@ -32,6 +33,7 @@
+ #include "gis/trk/CTrackData.h"
+ #include "gis/trk/filter/CFilterSpeedCycle.h"
+ #include "gis/trk/filter/CFilterSpeedHike.h"
++#include "gis/trk/surface/CSurfaceTrk.h"
+ #include "helpers/CLimit.h"
+ #include "helpers/CSmoothingSpline.h"
+ #include "helpers/CValue.h"
+@@ -179,6 +181,9 @@ class CGisItemTrk : public IGisItem, public IGisLine {
+ 
+   CEnergyCycling& getEnergyCycling() { return energyCycling; }
+ 
++  /// surfaces and way types from the surface databases (see CSurfaceTrk)
++  const CSurfaceTrk& getSurface() const { return *surface; }
++
+   /// returns "true" when trk has no time-related invalid points
+   bool isTrkTimeValid() const { return (allValidFlags & CTrackData::trkpt_t::eInvalidTime) == 0; }
+   bool isTrkElevationInvalid() const { return (allValidFlags & CTrackData::trkpt_t::eInvalidEle) != 0; }
+@@ -296,6 +301,7 @@ class CGisItemTrk : public IGisItem, public IGisLine {
+  private:
+   void drawColorized(QPainter& p) const;
+   void drawColorizedByActivity(QPainter& p) const;
++  void drawColorizedByCategory(QPainter& p) const;
+   void setPen(QPainter& p, QPen& pen, trkact_t act) const;
+   /**@}*/
+ 
+@@ -676,6 +682,10 @@ class CGisItemTrk : public IGisItem, public IGisLine {
+   QHash<QString, limits_t> extrema;
+   void updateExtremaAndExtensions();
+ 
++  friend class CSurfaceTrk;
++  /// a surface analysis finished or the surface databases changed
++  void updateSurface();
++
+   enum limit_type_e { eLimitTypeMin, eLimitTypeMax };
+   void drawLimitLabels(limit_type_e type, const QString& label, const QPointF& pos, QPainter& p,
+                        const QFontMetricsF& fm, QList<QRectF>& blockedAreas);
+@@ -786,6 +796,8 @@ class CGisItemTrk : public IGisItem, public IGisLine {
+   quint32 numberOfAttachedWpt = 0;
+   CEnergyCycling energyCycling{*this};
+ 
++  std::unique_ptr<CSurfaceTrk> surface = std::make_unique<CSurfaceTrk>(*this);
++
+   void checkForInvalidPoints();
+   /**@}*/
+ 
+diff --git a/src/qmapshack/gis/trk/CKnownExtension.cpp b/src/qmapshack/gis/trk/CKnownExtension.cpp
+index 09d96ba..f62d5db 100644
+--- a/src/qmapshack/gis/trk/CKnownExtension.cpp
++++ b/src/qmapshack/gis/trk/CKnownExtension.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <QStringBuilder>
+ 
++#include "gis/trk/surface/CSurface.h"
+ #include "units/IUnit.h"
+ 
+ const QString CKnownExtension::internalSlope = "ql:slope";
+@@ -28,6 +29,8 @@ const QString CKnownExtension::internalSpeedTime = "ql:speedtime";
+ const QString CKnownExtension::internalEle = "ql:ele";
+ const QString CKnownExtension::internalProgress = "ql:progress";
+ const QString CKnownExtension::internalTerrainSlope = "ql:terrainslope";
++const QString CKnownExtension::internalSurface = "ql:surface";
++const QString CKnownExtension::internalWayType = "ql:waytype";
+ 
+ QHash<QString, CKnownExtension> CKnownExtension::knownExtensions;
+ QSet<QString> CKnownExtension::registeredNS;
+@@ -191,7 +194,17 @@ void CKnownExtension::init(const IUnit& units) {
+ 
+       {internalTerrainSlope,
+        {tr("Terr. Slope", "extShortName"), tr("Terrain Slope*", "extLongName"), -1, 0, 90., 1., "°",
+-        "://icons/CSrcSlope.svgt", true, false, getExtensionValueFunc(internalTerrainSlope)}}};
++        "://icons/CSrcSlope.svgt", true, false, getExtensionValueFunc(internalTerrainSlope)}},
++
++      {internalSurface,
++       {tr("Surface", "extShortName"), tr("Surface*", "extLongName"), -1, 0., CSurface::eClassCount - 1, 1., "",
++        "://icons/ActFoot.svgt", true, true,
++        [](const CTrackData::trkpt_t& p) { return p.surfaceClass < 0 ? NOFLOAT : qreal(p.surfaceClass); }}},
++
++      {internalWayType,
++       {tr("Way Type", "extShortName"), tr("Way Type*", "extLongName"), -1, 0., CSurface::eWayCount - 1, 1., "",
++        "://icons/PathOrange.svgt", true, true,
++        [](const CTrackData::trkpt_t& p) { return p.surfaceWay < 0 ? NOFLOAT : qreal(p.surfaceWay); }}}};
+ 
+   initGarminTPXv1(units, "gpxtpx");
+   initGarminTPXv1(units, "tp1");
+@@ -208,6 +221,8 @@ const CKnownExtension CKnownExtension::get(const QString& key) {
+ 
+ bool CKnownExtension::isKnown(const QString& key) { return knownExtensions.contains(key); }
+ 
++bool CKnownExtension::isCategorical(const QString& key) { return key == internalSurface || key == internalWayType; }
++
+ QString CKnownExtension::getName(const QString& altName) const {
+   bool hasNoName = nameShortText.isEmpty();
+   QString name = hasNoName ? altName : nameShortText;
+@@ -223,6 +238,12 @@ QString CKnownExtension::toString(qreal value, bool withName, const QString& key
+   QString str;
+   if (key == CKnownExtension::internalProgress) {
+     return str;
++  } else if (key == CKnownExtension::internalSurface) {
++    str = (value >= 0 && value < int(CSurface::eClassCount)) ? CSurface::className(CSurface::class_e(qRound(value)))
++                                                             : "-";
++  } else if (key == CKnownExtension::internalWayType) {
++    str = (value >= 0 && value < int(CSurface::eWayCount)) ? CSurface::wayTypeName(CSurface::waytype_e(qRound(value)))
++                                                           : "-";
+   } else if (key.contains("speed")) {
+     QString v, u;
+     IUnit::self().meter2speed(value, v, u);
+diff --git a/src/qmapshack/gis/trk/CKnownExtension.h b/src/qmapshack/gis/trk/CKnownExtension.h
+index 8d67812..5b7758e 100644
+--- a/src/qmapshack/gis/trk/CKnownExtension.h
++++ b/src/qmapshack/gis/trk/CKnownExtension.h
+@@ -49,6 +49,11 @@ class CKnownExtension {
+   static const QString internalEle;           //< name of internally derived elevation (DEM)
+   static const QString internalProgress;      //< name of internally derived progress
+   static const QString internalTerrainSlope;  //< name of internally derived terrain slope
++  static const QString internalSurface;       //< name of the surface class from a surface database
++  static const QString internalWayType;       //< name of the way type from a surface database
++
++  /// true for sources with a fixed set of values, drawn with one color per value
++  static bool isCategorical(const QString& key);
+ 
+   /**
+      @brief Get extension descriptor for name
+diff --git a/src/qmapshack/gis/trk/CTrackData.h b/src/qmapshack/gis/trk/CTrackData.h
+index c557367..e3e21ac 100644
+--- a/src/qmapshack/gis/trk/CTrackData.h
++++ b/src/qmapshack/gis/trk/CTrackData.h
+@@ -160,6 +160,9 @@ class CTrackData {
+     qreal slope1;                         //< the slope [°] over several points close by
+     qreal slope2;                         //< the slope [%] over several points close by
+     qreal speed;                          //< the speed over several points close by
++    qint8 surfaceClass = -1;              //< surface class (CSurface::class_e) from a surface database, -1: none
++    qint8 surfaceWay = -1;                //< way type (CSurface::waytype_e), -1: none
++    qint8 surfaceLabel = -1;              //< detailed surface (CSurface::label_e), -1: none
+     qreal elapsedSeconds;                 //< the seconds since the start of the track
+     qreal elapsedSecondsMoving;           //< the seconds since the start of the track with moving speed
+     IGisItem::key_t keyWpt;               //< the key of an attached waypoint
+diff --git a/src/qmapshack/gis/trk/IDetailsTrk.ui b/src/qmapshack/gis/trk/IDetailsTrk.ui
+index 112182d..d27a644 100644
+--- a/src/qmapshack/gis/trk/IDetailsTrk.ui
++++ b/src/qmapshack/gis/trk/IDetailsTrk.ui
+@@ -463,11 +463,21 @@
+               <widget class="CPlotTrack" name="plotTrack" native="true"/>
+              </item>
+              <item>
+-              <widget class="QTextBrowser" name="textCmtDesc">
+-               <property name="openLinks">
+-                <bool>false</bool>
++              <layout class="QVBoxLayout" name="layoutCmtDescSurface">
++               <property name="spacing">
++                <number>3</number>
+                </property>
+-              </widget>
++               <item>
++                <widget class="QTextBrowser" name="textCmtDesc">
++                 <property name="openLinks">
++                  <bool>false</bool>
++                 </property>
++                </widget>
++               </item>
++               <item>
++                <widget class="CSurfaceWidget" name="widgetSurface" native="true"/>
++               </item>
++              </layout>
+              </item>
+             </layout>
+            </widget>
+@@ -1762,6 +1772,12 @@
+    <extends>QTreeWidget</extends>
+    <header>gis/trk/CTableTrkInfo.h</header>
+   </customwidget>
++  <customwidget>
++   <class>CSurfaceWidget</class>
++   <extends>QWidget</extends>
++   <header>gis/trk/surface/CSurfaceWidget.h</header>
++   <container>1</container>
++  </customwidget>
+  </customwidgets>
+  <resources>
+   <include location="../../resources.qrc"/>
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
+new file mode 100644
+index 0000000..bbafb99
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
+@@ -0,0 +1,139 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceDbManager.h"
++
++#include <QDir>
++#include <QFileInfo>
++
++#include "gis/trk/surface/CSurfaceDb.h"
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++#include "helpers/CSettings.h"
++#include "setup/IAppSetup.h"
++
++CSurfaceDbManager& CSurfaceDbManager::self() {
++  static CSurfaceDbManager* instance = new CSurfaceDbManager();
++  return *instance;
++}
++
++CSurfaceDbManager::CSurfaceDbManager() {
++  SETTINGS;
++  path = cfg.value("Surface/path", QString()).toString();
++  inactive = cfg.value("Surface/inactive", QStringList()).toStringList();
++  if (path.isEmpty()) {
++    path = defaultPath();
++  }
++  rescan();
++}
++
++QString CSurfaceDbManager::defaultPath() {
++  SETTINGS;
++  const QStringList routino = cfg.value("Route/routino/paths", QStringList()).toStringList();
++  if (!routino.isEmpty() && !routino.first().isEmpty()) {
++    QDir dir(routino.first());
++    if (dir.cdUp()) {
++      return dir.absoluteFilePath("Surface");
++    }
++  }
++  return IAppSetup::getPlatformInstance()->userDataPath("Surface");
++}
++
++void CSurfaceDbManager::save() {
++  SETTINGS;
++  cfg.setValue("Surface/path", path);
++  cfg.setValue("Surface/inactive", inactive);
++}
++
++void CSurfaceDbManager::setPath(const QString& newPath) {
++  if (newPath == path) {
++    return;
++  }
++  path = newPath;
++  save();
++  rescan();
++}
++
++void CSurfaceDbManager::setActive(const QString& file, bool yes) {
++  const QString name = QFileInfo(file).fileName();
++  if (yes) {
++    inactive.removeAll(name);
++  } else if (!inactive.contains(name)) {
++    inactive << name;
++  }
++  save();
++  rescan();
++}
++
++void CSurfaceDbManager::rescan() {
++  QList<db_t> found;
++  const QDir dir(path);
++  const QStringList files = dir.entryList({"*." + CSurfaceDbBuilder::suffix}, QDir::Files, QDir::Name);
++  for (const QString& name : files) {
++    db_t entry;
++    entry.file = dir.absoluteFilePath(name);
++    entry.active = !inactive.contains(name);
++
++    CSurfaceDb db(entry.file);
++    if (db.isValid()) {
++      entry.name = db.name();
++      entry.source = db.source();
++      entry.boundingBox = db.boundingBox();
++      entry.osmTimestamp = db.osmTimestamp();
++      entry.created = db.created();
++      entry.chunks = db.chunkCount();
++    } else {
++      entry.error = db.errorString();
++    }
++    found << entry;
++  }
++
++  auto key = [](const QList<db_t>& list) {
++    QStringList items;
++    for (const db_t& db : list) {
++      items << db.file + "|" + db.created.toString(Qt::ISODate) + "|" + QString::number(db.active) + "|" + db.error;
++    }
++    return items;
++  };
++
++  const bool changed = key(found) != key(databases);
++  databases = found;
++  if (changed) {
++    generation++;
++    emit sigChanged();
++  }
++}
++
++QStringList CSurfaceDbManager::getActiveFiles() const {
++  QStringList files;
++  for (const db_t& db : databases) {
++    if (db.active && db.error.isEmpty()) {
++      files << db.file;
++    }
++  }
++  return files;
++}
++
++bool CSurfaceDbManager::covers(const QRectF& area) const {
++  for (const db_t& db : databases) {
++    if (db.active && db.error.isEmpty() &&
++        (db.boundingBox.intersects(area) || db.boundingBox.contains(area.center()))) {
++      return true;
++    }
++  }
++  return false;
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
+new file mode 100644
+index 0000000..6211cd6
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
+@@ -0,0 +1,85 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEDBMANAGER_H
++#define CSURFACEDBMANAGER_H
++
++#include <QDateTime>
++#include <QObject>
++#include <QRectF>
++#include <QStringList>
++
++/**
++   @brief Knows the surface databases (see CSurfaceDb) in the configured directory
++
++   All `*.surface.sqlite` files in the directory are used unless the user switched them off.
++   The default directory is "Surface" next to the first Routino database path, or in the user
++   data directory if no Routino path is set up.
++ */
++class CSurfaceDbManager : public QObject {
++  Q_OBJECT
++ public:
++  static CSurfaceDbManager& self();
++  virtual ~CSurfaceDbManager() = default;
++
++  struct db_t {
++    QString file;
++    QString name;
++    QString source;
++    QString error;  ///< not empty if the file can't be used
++    QRectF boundingBox;
++    QDateTime osmTimestamp;
++    QDateTime created;
++    qint64 chunks = 0;
++    bool active = true;
++  };
++
++  QString getPath() const { return path; }
++  void setPath(const QString& path);
++
++  const QList<db_t>& getDatabases() const { return databases; }
++  /// usable and active database files
++  QStringList getActiveFiles() const;
++  /// true if an active database's area intersects the rectangle (x = longitude, y = latitude)
++  bool covers(const QRectF& area) const;
++  void setActive(const QString& file, bool yes);
++
++  /// changes whenever the set of usable databases changes
++  quint32 getGeneration() const { return generation; }
++
++  /// the directory used if the user did not choose one
++  static QString defaultPath();
++
++ public slots:
++  /// read the directory again, emits sigChanged() if anything changed
++  void rescan();
++
++ signals:
++  void sigChanged();
++
++ private:
++  CSurfaceDbManager();
++  void save();
++
++  QString path;
++  QStringList inactive;
++  QList<db_t> databases;
++  quint32 generation = 1;
++};
++
++#endif  // CSURFACEDBMANAGER_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp b/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
+new file mode 100644
+index 0000000..2e835a5
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
+@@ -0,0 +1,174 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceTrk.h"
++
++#include <QApplication>
++#include <QThreadPool>
++#include <QtConcurrent>
++
++#include "canvas/CCanvas.h"
++#include "gis/trk/CGisItemTrk.h"
++#include "gis/trk/surface/CSurfaceDb.h"
++#include "gis/trk/surface/CSurfaceDbManager.h"
++
++static QThreadPool& pool() {
++  // each job opens its own database connections, a few in parallel are plenty
++  static QThreadPool* pool = [] {
++    QThreadPool* p = new QThreadPool();
++    p->setMaxThreadCount(2);
++    return p;
++  }();
++  return *pool;
++}
++
++CSurfaceTrk::CSurfaceTrk(CGisItemTrk& trk) : trk(trk) {
++  if (thread() != qApp->thread()) {
++    moveToThread(qApp->thread());
++  }
++  watcher = new QFutureWatcher<CSurfaceAnalyzer::result_t>(this);
++  connect(watcher, &QFutureWatcher<CSurfaceAnalyzer::result_t>::finished, this, &CSurfaceTrk::slotFinished);
++  connect(&CSurfaceDbManager::self(), &CSurfaceDbManager::sigChanged, this, &CSurfaceTrk::slotDatabasesChanged);
++}
++
++CSurfaceTrk::~CSurfaceTrk() {
++  if (cancel) {
++    cancel->store(true);
++  }
++}
++
++void CSurfaceTrk::update(CTrackData& data) {
++  points.clear();
++  indices.clear();
++  QRectF area;
++  for (const CTrackData::trkseg_t& seg : std::as_const(data.segs)) {
++    bool newSegment = true;
++    for (const CTrackData::trkpt_t& pt : seg.pts) {
++      if (pt.isHidden()) {
++        continue;
++      }
++      points << CSurfaceAnalyzer::point_t{pt.lat, pt.lon, newSegment};
++      indices << pt.idxTotal;
++      area |= QRectF(pt.lon, pt.lat, 1e-9, 1e-9);
++      newSegment = false;
++    }
++  }
++
++  size_t hash = qHash(CSurfaceDbManager::self().getGeneration());
++  for (const CSurfaceAnalyzer::point_t& pt : std::as_const(points)) {
++    hash = qHashMulti(hash, pt.lat, pt.lon, pt.newSegment);
++  }
++  hashPoints = hash;
++
++  if (points.isEmpty()) {
++    state = eStateNoTrack;
++    return;
++  }
++
++  if (!CSurfaceDbManager::self().covers(area)) {
++    state = eStateNoDatabase;
++    for (CTrackData::trkpt_t& pt : data) {
++      pt.surfaceClass = -1;
++      pt.surfaceWay = -1;
++      pt.surfaceLabel = -1;
++    }
++    if (cancel) {
++      cancel->store(true);
++    }
++    hashRunning = 0;
++    return;
++  }
++
++  if (hashPoints == hashResult) {
++    state = eStateReady;
++    apply(data);
++    return;
++  }
++
++  state = eStateAnalyzing;
++  if (hashPoints != hashRunning) {
++    // the track may live in another thread while it is loaded
++    QMetaObject::invokeMethod(this, &CSurfaceTrk::start, Qt::QueuedConnection);
++    hashRunning = hashPoints;
++  }
++}
++
++void CSurfaceTrk::start() {
++  if (cancel) {
++    cancel->store(true);
++  }
++  cancel = std::make_shared<std::atomic_bool>(false);
++
++  const QVector<CSurfaceAnalyzer::point_t> pts = points;
++  const QStringList files = CSurfaceDbManager::self().getActiveFiles();
++  const std::shared_ptr<std::atomic_bool> flag = cancel;
++  QFuture<CSurfaceAnalyzer::result_t> future = QtConcurrent::run(&pool(), [pts, files, flag]() {
++    CSurfaceDbSet set(files);
++    const CSurfaceAnalyzer::options_t opts;
++    return CSurfaceAnalyzer::analyze(
++        pts, [&](qreal lat, qreal lon) { return set.lookup(lat, lon, opts.fallbackDistance); }, opts, flag.get());
++  });
++  // the input the result will belong to
++  watcher->setProperty("hash", QVariant::fromValue(quint64(hashRunning)));
++  watcher->setFuture(future);
++}
++
++void CSurfaceTrk::slotFinished() {
++  const CSurfaceAnalyzer::result_t res = watcher->result();
++  const size_t hash = size_t(watcher->property("hash").toULongLong());
++  if (!res.valid || hash != hashRunning || hash != hashPoints) {
++    return;  // canceled or outdated, a newer job is on its way
++  }
++
++  result = res;
++  hashResult = hash;
++  hashRunning = 0;
++  state = eStateReady;
++  trk.updateSurface();
++}
++
++void CSurfaceTrk::slotDatabasesChanged() {
++  hashResult = 0;
++  hashRunning = 0;
++  trk.updateSurface();
++}
++
++void CSurfaceTrk::apply(CTrackData& data) {
++  if (result.perPoint.size() != indices.size()) {
++    return;
++  }
++
++  QHash<qint32, qint32> visible;
++  for (qint32 i = 0; i < indices.size(); i++) {
++    visible[indices[i]] = i;
++  }
++
++  for (CTrackData::trkpt_t& pt : data) {
++    auto it = visible.constFind(pt.idxTotal);
++    if (it == visible.constEnd()) {
++      pt.surfaceClass = -1;
++      pt.surfaceWay = -1;
++      pt.surfaceLabel = -1;
++      continue;
++    }
++    const CSurface::info_t& info = result.perPoint[*it];
++    pt.surfaceClass = info.cls;
++    pt.surfaceWay = info.way;
++    pt.surfaceLabel = info.label;
++  }
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceTrk.h b/src/qmapshack/gis/trk/surface/CSurfaceTrk.h
+new file mode 100644
+index 0000000..c81db21
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceTrk.h
+@@ -0,0 +1,81 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACETRK_H
++#define CSURFACETRK_H
++
++#include <QFutureWatcher>
++#include <QObject>
++#include <memory>
++
++#include "gis/trk/surface/CSurfaceAnalyzer.h"
++
++class CGisItemTrk;
++class CTrackData;
++
++/**
++   @brief The surface analysis of one track
++
++   Owned by the track. CGisItemTrk::deriveSecondaryData() calls update() on every change. If
++   the visible points are the same as for the last result, it is applied again at once.
++   Otherwise an analysis starts in the background; when it is done the track's visuals are
++   updated. Nothing of this is saved with the track.
++ */
++class CSurfaceTrk : public QObject {
++  Q_OBJECT
++ public:
++  enum state_e {
++    eStateNoTrack,     ///< no visible points
++    eStateNoDatabase,  ///< no active surface database covers the track
++    eStateAnalyzing,   ///< waiting for the background job
++    eStateReady        ///< getResult() is valid
++  };
++
++  CSurfaceTrk(CGisItemTrk& trk);
++  virtual ~CSurfaceTrk();
++
++  /// apply a known result to the points or start an analysis
++  void update(CTrackData& data);
++
++  state_e getState() const { return state; }
++  const CSurfaceAnalyzer::result_t& getResult() const { return result; }
++
++ private slots:
++  void slotFinished();
++  void slotDatabasesChanged();
++
++ private:
++  void start();
++  void apply(CTrackData& data);
++
++  CGisItemTrk& trk;
++  state_e state = eStateNoTrack;
++
++  QVector<CSurfaceAnalyzer::point_t> points;
++  /// visible point index -> total index
++  QVector<qint32> indices;
++  size_t hashPoints = 0;
++  size_t hashResult = 0;
++  size_t hashRunning = 0;
++
++  CSurfaceAnalyzer::result_t result;
++  QFutureWatcher<CSurfaceAnalyzer::result_t>* watcher;
++  std::shared_ptr<std::atomic_bool> cancel;
++};
++
++#endif  // CSURFACETRK_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp b/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
+new file mode 100644
+index 0000000..bbf6865
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
+@@ -0,0 +1,239 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceWidget.h"
++
++#include <QtWidgets>
++#include <algorithm>
++
++#include "helpers/CSettings.h"
++#include "units/IUnit.h"
++
++CSurfaceBar::CSurfaceBar(QWidget* parent) : QWidget(parent) {
++  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++}
++
++void CSurfaceBar::setParts(const QList<part_t>& newParts) {
++  parts = newParts;
++  total = 0;
++  for (const part_t& part : std::as_const(parts)) {
++    total += part.value;
++  }
++  update();
++}
++
++QSize CSurfaceBar::sizeHint() const { return QSize(200, fontMetrics().height()); }
++
++QSize CSurfaceBar::minimumSizeHint() const { return QSize(50, fontMetrics().height()); }
++
++void CSurfaceBar::paintEvent(QPaintEvent*) {
++  QPainter p(this);
++  p.setRenderHint(QPainter::Antialiasing);
++  const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
++
++  QPainterPath clip;
++  clip.addRoundedRect(r, 3, 3);
++  p.setClipPath(clip);
++
++  qreal x = r.left();
++  for (const part_t& part : std::as_const(parts)) {
++    if (total <= 0 || part.value <= 0) {
++      continue;
++    }
++    const qreal w = r.width() * part.value / total;
++    p.fillRect(QRectF(x, r.top(), w, r.height()), part.color);
++    x += w;
++  }
++
++  p.setClipping(false);
++  p.setPen(QPen(palette().color(QPalette::Mid), 1));
++  p.setBrush(Qt::NoBrush);
++  p.drawRoundedRect(r, 3, 3);
++}
++
++bool CSurfaceBar::event(QEvent* e) {
++  if (e->type() == QEvent::ToolTip && total > 0) {
++    QHelpEvent* help = static_cast<QHelpEvent*>(e);
++    qreal x = 0;
++    for (const part_t& part : std::as_const(parts)) {
++      x += width() * part.value / total;
++      if (help->pos().x() <= x) {
++        QToolTip::showText(help->globalPos(), part.text, this);
++        return true;
++      }
++    }
++  }
++  return QWidget::event(e);
++}
++
++CSurfaceWidget::CSurfaceWidget(QWidget* parent) : QWidget(parent) {
++  QVBoxLayout* layout = new QVBoxLayout(this);
++  layout->setContentsMargins(3, 3, 3, 3);
++  layout->setSpacing(3);
++
++  labelHint = new QLabel(this);
++  labelHint->setWordWrap(true);
++  labelHint->setTextFormat(Qt::RichText);
++  connect(labelHint, &QLabel::linkActivated, this, &CSurfaceWidget::sigSetup);
++  layout->addWidget(labelHint);
++
++  auto addBar = [&](QLabel*& title, CSurfaceBar*& bar, QLabel*& legend, const QString& text) {
++    title = new QLabel("<b>" + text + "</b>", this);
++    bar = new CSurfaceBar(this);
++    legend = new QLabel(this);
++    legend->setTextFormat(Qt::RichText);
++    layout->addWidget(title);
++    layout->addWidget(bar);
++    layout->addWidget(legend);
++  };
++  addBar(labelClasses, barClasses, legendClasses, tr("Surfaces"));
++  addBar(labelWays, barWays, legendWays, tr("Way types"));
++
++  toolDetails = new QToolButton(this);
++  toolDetails->setText(tr("Surfaces in detail"));
++  toolDetails->setCheckable(true);
++  toolDetails->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
++  toolDetails->setArrowType(Qt::RightArrow);
++  toolDetails->setAutoRaise(true);
++  layout->addWidget(toolDetails);
++
++  labelDetails = new QLabel(this);
++  labelDetails->setTextFormat(Qt::RichText);
++  layout->addWidget(labelDetails);
++
++  layout->addStretch();
++
++  SETTINGS;
++  toolDetails->setChecked(cfg.value("TrackDetails/surfaceDetails", false).toBool());
++  slotDetails(toolDetails->isChecked());
++  connect(toolDetails, &QToolButton::toggled, this, &CSurfaceWidget::slotDetails);
++}
++
++void CSurfaceWidget::slotDetails(bool show) {
++  toolDetails->setArrowType(show ? Qt::DownArrow : Qt::RightArrow);
++  labelDetails->setVisible(show && toolDetails->isVisible());
++  SETTINGS;
++  cfg.setValue("TrackDetails/surfaceDetails", show);
++}
++
++static QString km(qreal meter) {
++  QString val, unit;
++  IUnit::self().meter2distance(meter, val, unit);
++  return val + "&nbsp;" + unit;
++}
++
++// one table row: color, name, length, share
++static QString legendItem(const QColor& color, const QString& name, qreal meter, qreal total) {
++  return QString(
++             "<tr><td><span style='color:%1'>&#9632;</span>&nbsp;</td><td nowrap>%2</td>"
++             "<td align='right' nowrap>&nbsp;&nbsp;%3</td><td align='right' nowrap>&nbsp;&nbsp;%4%</td></tr>")
++      .arg(color.name(), name.toHtmlEscaped(), km(meter))
++      .arg(qRound(100 * meter / total));
++}
++
++void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
++  const CSurfaceTrk::state_e state = surface.getState();
++  const bool ready = state == CSurfaceTrk::eStateReady && surface.getResult().total > 0;
++
++  for (QWidget* w :
++       QList<QWidget*>{labelClasses, barClasses, legendClasses, labelWays, barWays, legendWays, toolDetails}) {
++    w->setVisible(ready);
++  }
++  labelDetails->setVisible(ready && toolDetails->isChecked());
++
++  switch (state) {
++    case CSurfaceTrk::eStateNoDatabase:
++      labelHint->setText(
++          tr("<b>Surfaces</b><br/>No surface database covers this track. Build one from an OpenStreetMap "
++             "extract (.osm.pbf, e.g. from download.geofabrik.de) with <a href='setup'>Tools &rarr; Create Surface "
++             "Database</a>."));
++      labelHint->show();
++      return;
++    case CSurfaceTrk::eStateAnalyzing:
++      labelHint->setText(tr("<b>Surfaces</b><br/>Analyzing the track..."));
++      labelHint->show();
++      return;
++    case CSurfaceTrk::eStateNoTrack:
++      labelHint->hide();
++      return;
++    default:
++      labelHint->setVisible(!ready);
++      labelHint->setText(tr("<b>Surfaces</b><br/>The track is too short."));
++      break;
++  }
++  if (!ready) {
++    return;
++  }
++
++  const CSurfaceAnalyzer::result_t& res = surface.getResult();
++
++  QList<CSurfaceBar::part_t> parts;
++  QStringList legend;
++  for (int i = 0; i < CSurface::eClassCount; i++) {
++    const CSurface::class_e cls = CSurface::class_e(i);
++    const qreal m = res.byClass[i];
++    if (m <= 0) {
++      continue;
++    }
++    const QString name = CSurface::className(cls);
++    parts << CSurfaceBar::part_t{CSurface::classColor(cls), m,
++                                 QString("%1: %2 %").arg(name).arg(qRound(res.percent(cls)))};
++    legend << legendItem(CSurface::classColor(cls), name, m, res.total);
++  }
++  barClasses->setParts(parts);
++  legendClasses->setText("<table cellspacing='0'>" + legend.join("") + "</table>");
++
++  // way types sorted by length, like the classes they are few
++  QVector<int> ways;
++  for (int i = 0; i < CSurface::eWayCount; i++) {
++    if (res.byWay[i] > 0) {
++      ways << i;
++    }
++  }
++  std::stable_sort(ways.begin(), ways.end(), [&](int a, int b) { return res.byWay[a] > res.byWay[b]; });
++  parts.clear();
++  legend.clear();
++  for (int i : std::as_const(ways)) {
++    const CSurface::waytype_e way = CSurface::waytype_e(i);
++    const QString name = CSurface::wayTypeName(way);
++    const qreal m = res.byWay[i];
++    parts << CSurfaceBar::part_t{CSurface::wayTypeColor(way), m,
++                                 QString("%1: %2 %").arg(name).arg(qRound(100 * m / res.total))};
++    legend << legendItem(CSurface::wayTypeColor(way), name, m, res.total);
++  }
++  barWays->setParts(parts);
++  legendWays->setText("<table cellspacing='0'>" + legend.join("") + "</table>");
++
++  QVector<int> labels;
++  for (int i = 0; i < CSurface::eLabelCount; i++) {
++    if (res.byLabel[i] > 0) {
++      labels << i;
++    }
++  }
++  std::stable_sort(labels.begin(), labels.end(), [&](int a, int b) { return res.byLabel[a] > res.byLabel[b]; });
++  QString details = "<table>";
++  for (int i : std::as_const(labels)) {
++    details += QString(
++                   "<tr><td nowrap>%1</td><td align='right' nowrap>&nbsp;&nbsp;%2</td><td align='right' "
++                   "nowrap>&nbsp;&nbsp;%3%</td></tr>")
++                   .arg(CSurface::labelName(CSurface::label_e(i)).toHtmlEscaped(), km(res.byLabel[i]))
++                   .arg(qRound(100 * res.byLabel[i] / res.total));
++  }
++  details += "</table>";
++  labelDetails->setText(details);
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceWidget.h b/src/qmapshack/gis/trk/surface/CSurfaceWidget.h
+new file mode 100644
+index 0000000..ffb231a
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceWidget.h
+@@ -0,0 +1,88 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEWIDGET_H
++#define CSURFACEWIDGET_H
++
++#include <QWidget>
++
++#include "gis/trk/surface/CSurfaceTrk.h"
++
++class QLabel;
++class QToolButton;
++
++/// a horizontal bar of coloured parts
++class CSurfaceBar : public QWidget {
++  Q_OBJECT
++ public:
++  CSurfaceBar(QWidget* parent);
++  virtual ~CSurfaceBar() = default;
++
++  struct part_t {
++    QColor color;
++    qreal value;
++    QString text;  ///< tooltip
++  };
++  void setParts(const QList<part_t>& parts);
++
++  QSize sizeHint() const override;
++  QSize minimumSizeHint() const override;
++
++ protected:
++  void paintEvent(QPaintEvent* e) override;
++  bool event(QEvent* e) override;
++
++ private:
++  QList<part_t> parts;
++  qreal total = 0;
++};
++
++/**
++   @brief Surfaces and way types of a track, for the track's Info tab
++
++   Two stacked bars with a legend (km and %) and a collapsible list of the detailed surfaces.
++   Without a surface database for the track it shows how to build one.
++ */
++class CSurfaceWidget : public QWidget {
++  Q_OBJECT
++ public:
++  CSurfaceWidget(QWidget* parent);
++  virtual ~CSurfaceWidget() = default;
++
++  void setData(const CSurfaceTrk& surface);
++
++ signals:
++  /// the user wants to build a surface database
++  void sigSetup();
++
++ private slots:
++  void slotDetails(bool show);
++
++ private:
++  QLabel* labelHint;
++  QLabel* labelClasses;
++  CSurfaceBar* barClasses;
++  QLabel* legendClasses;
++  QLabel* labelWays;
++  CSurfaceBar* barWays;
++  QLabel* legendWays;
++  QToolButton* toolDetails;
++  QLabel* labelDetails;
++};
++
++#endif  // CSURFACEWIDGET_H
+diff --git a/src/qmapshack/locale/qmapshack_nl.ts b/src/qmapshack/locale/qmapshack_nl.ts
+index 859eb52..205e542 100644
+--- a/src/qmapshack/locale/qmapshack_nl.ts
++++ b/src/qmapshack/locale/qmapshack_nl.ts
+@@ -1872,6 +1872,10 @@ You can modify both parameters to customize the behavior of the filter. For the
+ </context>
+ <context>
+     <name>CGisItemTrk</name>
++    <message>
++        <source>Surface: %1 (%2), %3</source>
++        <translation>Ondergrond: %1 (%2), %3</translation>
++    </message>
+     <message>
+         <location filename="../gis/tnv/serialization.cpp" line="166"/>
+         <location filename="../gis/tnv/serialization.cpp" line="292"/>
+@@ -3480,6 +3484,26 @@ lijn %2, kolom %3:
+ </context>
+ <context>
+     <name>CKnownExtension</name>
++    <message>
++        <source>Surface</source>
++        <comment>extShortName</comment>
++        <translation>Ondergrond</translation>
++    </message>
++    <message>
++        <source>Surface*</source>
++        <comment>extLongName</comment>
++        <translation>Ondergrond*</translation>
++    </message>
++    <message>
++        <source>Way Type</source>
++        <comment>extShortName</comment>
++        <translation>Wegtype</translation>
++    </message>
++    <message>
++        <source>Way Type*</source>
++        <comment>extLongName</comment>
++        <translation>Wegtype*</translation>
++    </message>
+     <message>
+         <location filename="../gis/trk/CKnownExtension.cpp" line="102"/>
+         <location filename="../gis/trk/CKnownExtension.cpp" line="142"/>
+@@ -14565,6 +14589,14 @@ Bestandsnaam: %1</translation>
+ </context>
+ <context>
+     <name>IMainWindow</name>
++    <message>
++        <source>Create Surface Database</source>
++        <translation>Ondergrond-database maken</translation>
++    </message>
++    <message>
++        <source>Build a database of road and path surfaces from an OpenStreetMap extract, to show the surfaces and way types of tracks.</source>
++        <translation>Maak een database met de ondergrond van wegen en paden uit een OpenStreetMap-uittreksel, om de ondergronden en wegtypes van tracks te tonen.</translation>
++    </message>
+     <message>
+         <location filename="../IMainWindow.ui" line="17"/>
+         <source>QMapShack</source>
+@@ -16346,6 +16378,18 @@ of
+ </context>
+ <context>
+     <name>IRouterRoutino</name>
++    <message>
++        <source>Surface</source>
++        <translation>Ondergrond</translation>
++    </message>
++    <message>
++        <source>Surface databases...</source>
++        <translation>Ondergrond-databases...</translation>
++    </message>
++    <message>
++        <source>Build surface databases from the same OpenStreetMap extracts, to show the surfaces and way types of tracks.</source>
++        <translation>Maak ondergrond-databases uit dezelfde OpenStreetMap-uittreksels, om de ondergronden en wegtypes van tracks te tonen.</translation>
++    </message>
+     <message>
+         <location filename="../gis/rte/router/IRouterRoutino.ui" line="14"/>
+         <source>Form</source>
+@@ -19291,4 +19335,382 @@ of
+         <translation type="unfinished"></translation>
+     </message>
+ </context>
++<context>
++    <name>CSurface</name>
++    <message>
++        <source>paved</source>
++        <comment>surface class</comment>
++        <translation>verhard</translation>
++    </message>
++    <message>
++        <source>semi-paved</source>
++        <comment>surface class</comment>
++        <translation>halfverhard</translation>
++    </message>
++    <message>
++        <source>unpaved</source>
++        <comment>surface class</comment>
++        <translation>onverhard</translation>
++    </message>
++    <message>
++        <source>unknown</source>
++        <comment>surface class</comment>
++        <translation>onbekend</translation>
++    </message>
++    <message>
++        <source>path</source>
++        <comment>way type</comment>
++        <translation>pad</translation>
++    </message>
++    <message>
++        <source>forest/field track</source>
++        <comment>way type</comment>
++        <translation>bos-/veldweg</translation>
++    </message>
++    <message>
++        <source>cycleway</source>
++        <comment>way type</comment>
++        <translation>fietspad</translation>
++    </message>
++    <message>
++        <source>steps</source>
++        <comment>way type</comment>
++        <translation>trap</translation>
++    </message>
++    <message>
++        <source>street</source>
++        <comment>way type</comment>
++        <translation>straat</translation>
++    </message>
++    <message>
++        <source>road</source>
++        <comment>way type</comment>
++        <translation>weg</translation>
++    </message>
++    <message>
++        <source>busy road</source>
++        <comment>way type</comment>
++        <translation>drukke weg</translation>
++    </message>
++    <message>
++        <source>other</source>
++        <comment>way type</comment>
++        <translation>overig</translation>
++    </message>
++    <message>
++        <source>no data</source>
++        <comment>way type</comment>
++        <translation>onbekend terrein</translation>
++    </message>
++    <message>
++        <source>asphalt</source>
++        <comment>surface</comment>
++        <translation>asfalt</translation>
++    </message>
++    <message>
++        <source>paved</source>
++        <comment>surface</comment>
++        <translation>verhard</translation>
++    </message>
++    <message>
++        <source>concrete</source>
++        <comment>surface</comment>
++        <translation>beton</translation>
++    </message>
++    <message>
++        <source>concrete lanes</source>
++        <comment>surface</comment>
++        <translation>betonsporen</translation>
++    </message>
++    <message>
++        <source>concrete plates</source>
++        <comment>surface</comment>
++        <translation>betonplaten</translation>
++    </message>
++    <message>
++        <source>paving stones</source>
++        <comment>surface</comment>
++        <translation>klinkers</translation>
++    </message>
++    <message>
++        <source>cobblestones</source>
++        <comment>surface</comment>
++        <translation>kasseien</translation>
++    </message>
++    <message>
++        <source>metal</source>
++        <comment>surface</comment>
++        <translation>metaal</translation>
++    </message>
++    <message>
++        <source>wood</source>
++        <comment>surface</comment>
++        <translation>hout</translation>
++    </message>
++    <message>
++        <source>compacted</source>
++        <comment>surface</comment>
++        <translation>verdicht steenslag</translation>
++    </message>
++    <message>
++        <source>fine gravel</source>
++        <comment>surface</comment>
++        <translation>fijn grind</translation>
++    </message>
++    <message>
++        <source>gravel</source>
++        <comment>surface</comment>
++        <translation>grind</translation>
++    </message>
++    <message>
++        <source>pebblestone</source>
++        <comment>surface</comment>
++        <translation>kiezel</translation>
++    </message>
++    <message>
++        <source>grass pavers</source>
++        <comment>surface</comment>
++        <translation>grasdallen</translation>
++    </message>
++    <message>
++        <source>semi-paved</source>
++        <comment>surface</comment>
++        <translation>halfverhard</translation>
++    </message>
++    <message>
++        <source>unpaved</source>
++        <comment>surface</comment>
++        <translation>onverhard</translation>
++    </message>
++    <message>
++        <source>dirt</source>
++        <comment>surface</comment>
++        <translation>aarde</translation>
++    </message>
++    <message>
++        <source>natural ground</source>
++        <comment>surface</comment>
++        <translation>natuurlijke bodem</translation>
++    </message>
++    <message>
++        <source>grass</source>
++        <comment>surface</comment>
++        <translation>gras</translation>
++    </message>
++    <message>
++        <source>mud</source>
++        <comment>surface</comment>
++        <translation>modder</translation>
++    </message>
++    <message>
++        <source>sand</source>
++        <comment>surface</comment>
++        <translation>zand</translation>
++    </message>
++    <message>
++        <source>woodchips</source>
++        <comment>surface</comment>
++        <translation>houtsnippers</translation>
++    </message>
++    <message>
++        <source>rock</source>
++        <comment>surface</comment>
++        <translation>rots</translation>
++    </message>
++    <message>
++        <source>stepping stones</source>
++        <comment>surface</comment>
++        <translation>stapstenen</translation>
++    </message>
++    <message>
++        <source>paved (assumed)</source>
++        <comment>surface</comment>
++        <translation>verhard (aangenomen)</translation>
++    </message>
++    <message>
++        <source>unpaved (assumed)</source>
++        <comment>surface</comment>
++        <translation>onverhard (aangenomen)</translation>
++    </message>
++    <message>
++        <source>unknown</source>
++        <comment>surface</comment>
++        <translation>onbekend</translation>
++    </message>
++</context>
++<context>
++    <name>CSurfaceWidget</name>
++    <message>
++        <source>Surfaces</source>
++        <translation>Ondergronden</translation>
++    </message>
++    <message>
++        <source>Way types</source>
++        <translation>Wegtypes</translation>
++    </message>
++    <message>
++        <source>Surfaces in detail</source>
++        <translation>Ondergrond in detail</translation>
++    </message>
++    <message>
++        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;No surface database covers this track. Build one from an OpenStreetMap extract (.osm.pbf, e.g. from download.geofabrik.de) with &lt;a href=&apos;setup&apos;&gt;Tools &amp;rarr; Create Surface Database&lt;/a&gt;.</source>
++        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;Geen ondergrond-database voor dit gebied. Maak er een van een OpenStreetMap-uittreksel (.osm.pbf, bv. van download.geofabrik.de) via &lt;a href=&apos;setup&apos;&gt;Gereedschap &amp;rarr; Ondergrond-database maken&lt;/a&gt;.</translation>
++    </message>
++    <message>
++        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;Analyzing the track...</source>
++        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;Track wordt geanalyseerd...</translation>
++    </message>
++    <message>
++        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;The track is too short.</source>
++        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;De track is te kort.</translation>
++    </message>
++</context>
++<context>
++    <name>CSurfaceDbBuilder</name>
++    <message>
++        <source>Reading ways...</source>
++        <translation>Wegen inlezen...</translation>
++    </message>
++    <message>
++        <source>Reading node locations...</source>
++        <translation>Posities van de knopen inlezen...</translation>
++    </message>
++    <message>
++        <source>Writing database...</source>
++        <translation>Database schrijven...</translation>
++    </message>
++    <message>
++        <source>Canceled.</source>
++        <translation>Afgebroken.</translation>
++    </message>
++    <message>
++        <source>No roads or paths found in %1.</source>
++        <translation>Geen wegen of paden gevonden in %1.</translation>
++    </message>
++    <message>
++        <source>Failed to write %1.</source>
++        <translation>%1 kon niet geschreven worden.</translation>
++    </message>
++    <message>
++        <source>Done.</source>
++        <translation>Klaar.</translation>
++    </message>
++</context>
++<context>
++    <name>CSurfaceDatabaseBuilder</name>
++    <message>
++        <source>Create Surface Database</source>
++        <translation>Ondergrond-database maken</translation>
++    </message>
++    <message>
++        <source>&lt;b&gt;Surface Database&lt;/b&gt;&lt;br/&gt;A surface database holds the roads and paths of an OpenStreetMap extract with their surface and type. With it, QMapShack shows the surfaces and way types of every track in the track&apos;s Info tab and can color tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from &lt;a href=&apos;https://download.geofabrik.de&apos;&gt;download.geofabrik.de&lt;/a&gt;, the same file as for a Routino database. For a small country building takes about a minute and some 300 MB of memory.</source>
++        <translation>&lt;b&gt;Ondergrond-database&lt;/b&gt;&lt;br/&gt;Een ondergrond-database bevat de wegen en paden van een OpenStreetMap-uittreksel met hun ondergrond en wegtype. Daarmee toont QMapShack de ondergronden en wegtypes van elke track in het tabblad Info van de track en kan het tracks kleuren volgens ondergrond (tabblad Stijl). Download een uittreksel (.osm.pbf), bv. van &lt;a href=&apos;https://download.geofabrik.de&apos;&gt;download.geofabrik.de&lt;/a&gt;, hetzelfde bestand als voor een Routino-database. Voor een klein land duurt het maken ongeveer een minuut en vraagt het zo&apos;n 300 MB geheugen.</translation>
++    </message>
++    <message>
++        <source>OSM extract</source>
++        <translation>OSM-uittreksel</translation>
++    </message>
++    <message>
++        <source>e.g. belgium-latest.osm.pbf</source>
++        <translation>bv. belgium-latest.osm.pbf</translation>
++    </message>
++    <message>
++        <source>Select the .osm.pbf file.</source>
++        <translation>Kies het .osm.pbf-bestand.</translation>
++    </message>
++    <message>
++        <source>Name</source>
++        <translation>Naam</translation>
++    </message>
++    <message>
++        <source>e.g. Belgium</source>
++        <translation>bv. België</translation>
++    </message>
++    <message>
++        <source>Directory</source>
++        <translation>Map</translation>
++    </message>
++    <message>
++        <source>Select the directory with the surface databases.</source>
++        <translation>Kies de map met de ondergrond-databases.</translation>
++    </message>
++    <message>
++        <source>File</source>
++        <translation>Bestand</translation>
++    </message>
++    <message>
++        <source>Build</source>
++        <translation>Maken</translation>
++    </message>
++    <message>
++        <source>Cancel</source>
++        <translation>Annuleren</translation>
++    </message>
++    <message>
++        <source>Surface databases (checked ones are used)</source>
++        <translation>Ondergrond-databases (de aangevinkte worden gebruikt)</translation>
++    </message>
++    <message>
++        <source>Area</source>
++        <translation>Gebied</translation>
++    </message>
++    <message>
++        <source>OSM data of</source>
++        <translation>OSM-gegevens van</translation>
++    </message>
++    <message>
++        <source>Select OSM extract...</source>
++        <translation>OSM-uittreksel kiezen...</translation>
++    </message>
++    <message>
++        <source>OSM extract (*.osm.pbf *.pbf)</source>
++        <translation>OSM-uittreksel (*.osm.pbf *.pbf)</translation>
++    </message>
++    <message>
++        <source>Select directory...</source>
++        <translation>Map kiezen...</translation>
++    </message>
++    <message>
++        <source>Replace database?</source>
++        <translation>Database vervangen?</translation>
++    </message>
++    <message>
++        <source>%1 already exists. Replace it?</source>
++        <translation>%1 bestaat al. Vervangen?</translation>
++    </message>
++    <message>
++        <source>Can&apos;t create %1.</source>
++        <translation>Kan %1 niet aanmaken.</translation>
++    </message>
++    <message>
++        <source>Starting...</source>
++        <translation>Starten...</translation>
++    </message>
++    <message>
++        <source>Done: %1 roads and paths with %2 nodes.</source>
++        <translation>Klaar: %1 wegen en paden met %2 knopen.</translation>
++    </message>
++    <message>
++        <source>Canceling...</source>
++        <translation>Afbreken...</translation>
++    </message>
++    <message>
++        <source>Failed: %1</source>
++        <translation>Mislukt: %1</translation>
++    </message>
++    <message>
++        <source>unusable</source>
++        <translation>onbruikbaar</translation>
++    </message>
++    <message>
++        <source>unknown</source>
++        <translation>onbekend</translation>
++    </message>
++    <message>
++        <source>%1
++from %2, built %3</source>
++        <translation>%1
++uit %2, gemaakt op %3</translation>
++    </message>
++</context>
+ </TS>
+diff --git a/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp b/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
+new file mode 100644
+index 0000000..89cff14
+--- /dev/null
++++ b/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
+@@ -0,0 +1,293 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "tool/CSurfaceDatabaseBuilder.h"
++
++#include <QtConcurrent>
++#include <QtWidgets>
++
++#include "gis/trk/surface/CSurfaceDbBuilder.h"
++#include "gis/trk/surface/CSurfaceDbManager.h"
++#include "helpers/CSettings.h"
++#include "theme/CUiTheme.h"
++
++CSurfaceDatabaseBuilder::CSurfaceDatabaseBuilder(QWidget* parent) : QWidget(parent) {
++  setObjectName(tr("Create Surface Database"));
++
++  QVBoxLayout* layout = new QVBoxLayout(this);
++
++  QLabel* help = new QLabel(this);
++  help->setWordWrap(true);
++  help->setOpenExternalLinks(true);
++  help->setText(
++      tr("<b>Surface Database</b><br/>A surface database holds the roads and paths of an OpenStreetMap extract with "
++         "their surface and type. With it, QMapShack shows the surfaces and way types of every track in the track's "
++         "Info tab and can color tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from "
++         "<a href='https://download.geofabrik.de'>download.geofabrik.de</a>, the same file as for a Routino "
++         "database. For a small country building takes about a minute and some 300 MB of memory."));
++  layout->addWidget(help);
++
++  QGridLayout* grid = new QGridLayout();
++  layout->addLayout(grid);
++
++  grid->addWidget(new QLabel(tr("OSM extract"), this), 0, 0);
++  lineSource = new QLineEdit(this);
++  lineSource->setPlaceholderText(tr("e.g. belgium-latest.osm.pbf"));
++  grid->addWidget(lineSource, 0, 1);
++  QToolButton* toolSource = new QToolButton(this);
++  toolSource->setIcon(QIcon("://icons/FileLoad.svgt"));
++  toolSource->setToolTip(tr("Select the .osm.pbf file."));
++  grid->addWidget(toolSource, 0, 2);
++
++  grid->addWidget(new QLabel(tr("Name"), this), 1, 0);
++  lineName = new QLineEdit(this);
++  lineName->setPlaceholderText(tr("e.g. Belgium"));
++  grid->addWidget(lineName, 1, 1);
++
++  grid->addWidget(new QLabel(tr("Directory"), this), 2, 0);
++  labelPath = new QLabel(this);
++  labelPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
++  grid->addWidget(labelPath, 2, 1);
++  QToolButton* toolPath = new QToolButton(this);
++  toolPath->setIcon(QIcon("://icons/PathBlue.svgt"));
++  toolPath->setToolTip(tr("Select the directory with the surface databases."));
++  grid->addWidget(toolPath, 2, 2);
++
++  grid->addWidget(new QLabel(tr("File"), this), 3, 0);
++  labelTarget = new QLabel(this);
++  grid->addWidget(labelTarget, 3, 1);
++
++  QHBoxLayout* buttons = new QHBoxLayout();
++  pushStart = new QPushButton(tr("Build"), this);
++  pushCancel = new QPushButton(tr("Cancel"), this);
++  progress = new QProgressBar(this);
++  progress->setRange(0, 1000);
++  progress->setTextVisible(true);
++  buttons->addWidget(pushStart);
++  buttons->addWidget(pushCancel);
++  buttons->addWidget(progress, 1);
++  layout->addLayout(buttons);
++
++  labelStatus = new QLabel(this);
++  labelStatus->setWordWrap(true);
++  layout->addWidget(labelStatus);
++
++  layout->addWidget(new QLabel("<b>" + tr("Surface databases (checked ones are used)") + "</b>", this));
++  treeDatabases = new QTreeWidget(this);
++  treeDatabases->setRootIsDecorated(false);
++  treeDatabases->setHeaderLabels({tr("Name"), tr("Area"), tr("OSM data of"), tr("File")});
++  layout->addWidget(treeDatabases, 1);
++
++  SETTINGS;
++  lineSource->setText(cfg.value("SurfaceDatabaseBuilder/source", QString()).toString());
++  lineName->setText(cfg.value("SurfaceDatabaseBuilder/name", QString()).toString());
++
++  connect(toolSource, &QToolButton::clicked, this, &CSurfaceDatabaseBuilder::slotSelectSource);
++  connect(toolPath, &QToolButton::clicked, this, &CSurfaceDatabaseBuilder::slotSelectPath);
++  connect(pushStart, &QPushButton::clicked, this, &CSurfaceDatabaseBuilder::slotStart);
++  connect(pushCancel, &QPushButton::clicked, this, &CSurfaceDatabaseBuilder::slotCancel);
++  connect(lineSource, &QLineEdit::textChanged, this, &CSurfaceDatabaseBuilder::updateButtons);
++  connect(lineName, &QLineEdit::textChanged, this, &CSurfaceDatabaseBuilder::updateButtons);
++  connect(&watcher, &QFutureWatcher<QString>::finished, this, &CSurfaceDatabaseBuilder::slotFinished);
++  connect(treeDatabases, &QTreeWidget::itemChanged, this, &CSurfaceDatabaseBuilder::slotItemChanged);
++  connect(&CSurfaceDbManager::self(), &CSurfaceDbManager::sigChanged, this,
++          &CSurfaceDatabaseBuilder::slotDatabasesChanged);
++
++  CSurfaceDbManager::self().rescan();
++  slotDatabasesChanged();
++  updateButtons();
++}
++
++CSurfaceDatabaseBuilder::~CSurfaceDatabaseBuilder() {
++  // the worker reports to this widget: stop it before going away
++  cancel = true;
++  watcher.waitForFinished();
++}
++
++QString CSurfaceDatabaseBuilder::targetFile() const {
++  QString name = lineName->text().trimmed();
++  name.replace(QRegularExpression("[^\\w.-]+"), "_");
++  if (name.isEmpty()) {
++    return QString();
++  }
++  return QDir(CSurfaceDbManager::self().getPath()).absoluteFilePath(name + "." + CSurfaceDbBuilder::suffix);
++}
++
++void CSurfaceDatabaseBuilder::updateButtons() {
++  const bool running = watcher.isRunning();
++  const QString target = targetFile();
++  labelPath->setText(CSurfaceDbManager::self().getPath());
++  labelTarget->setText(target.isEmpty() ? "-" : QFileInfo(target).fileName());
++  pushStart->setEnabled(!running && !target.isEmpty() && QFileInfo(lineSource->text()).isFile());
++  pushCancel->setEnabled(running);
++  lineSource->setEnabled(!running);
++  lineName->setEnabled(!running);
++}
++
++void CSurfaceDatabaseBuilder::slotSelectSource() {
++  QString path = lineSource->text();
++  if (path.isEmpty()) {
++    SETTINGS;
++    const QStringList routino = cfg.value("Route/routino/paths", QStringList()).toStringList();
++    path = routino.isEmpty() ? QDir::homePath() : routino.first();
++  }
++  const QString file =
++      QFileDialog::getOpenFileName(this, tr("Select OSM extract..."), path, tr("OSM extract (*.osm.pbf *.pbf)"));
++  if (file.isEmpty()) {
++    return;
++  }
++  lineSource->setText(file);
++  if (lineName->text().isEmpty()) {
++    // belgium-latest.osm.pbf -> Belgium
++    QString name = QFileInfo(file).fileName().section('.', 0, 0).remove("-latest");
++    if (!name.isEmpty()) {
++      name[0] = name[0].toUpper();
++    }
++    lineName->setText(name);
++  }
++}
++
++void CSurfaceDatabaseBuilder::slotSelectPath() {
++  const QString path =
++      QFileDialog::getExistingDirectory(this, tr("Select directory..."), CSurfaceDbManager::self().getPath());
++  if (path.isEmpty()) {
++    return;
++  }
++  CSurfaceDbManager::self().setPath(path);
++  updateButtons();
++}
++
++void CSurfaceDatabaseBuilder::slotStart() {
++  const QString target = targetFile();
++  if (QFileInfo::exists(target)) {
++    const int res = QMessageBox::question(this, tr("Replace database?"),
++                                          tr("%1 already exists. Replace it?").arg(QFileInfo(target).fileName()),
++                                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
++    if (res != QMessageBox::Yes) {
++      return;
++    }
++  }
++  if (!QDir().mkpath(CSurfaceDbManager::self().getPath())) {
++    labelStatus->setText(tr("Can't create %1.").arg(CSurfaceDbManager::self().getPath()));
++    return;
++  }
++
++  SETTINGS;
++  cfg.setValue("SurfaceDatabaseBuilder/source", lineSource->text());
++  cfg.setValue("SurfaceDatabaseBuilder/name", lineName->text());
++
++  CSurfaceDbBuilder::options_t opts;
++  opts.pbf = lineSource->text();
++  opts.target = target;
++  opts.name = lineName->text().trimmed();
++
++  cancel = false;
++  progress->setValue(0);
++  labelStatus->setText(tr("Starting..."));
++
++  watcher.setFuture(QtConcurrent::run([opts, this]() {
++    CSurfaceDbBuilder builder(opts);
++    int last = -1;
++    const bool ok = builder.build(
++        [&](qreal fraction, const QString& step) {
++          const int value = qRound(fraction * 1000);
++          if (value == last) {
++            return;
++          }
++          last = value;
++          QMetaObject::invokeMethod(
++              this,
++              [this, value, step]() {
++                progress->setValue(value);
++                labelStatus->setText(step);
++              },
++              Qt::QueuedConnection);
++        },
++        &cancel);
++    if (!ok) {
++      return builder.errorString();
++    }
++    const CSurfaceDbBuilder::stats_t& stats = builder.statistics();
++    return QString("ok:") + tr("Done: %1 roads and paths with %2 nodes.").arg(stats.ways).arg(stats.nodes);
++  }));
++  updateButtons();
++}
++
++void CSurfaceDatabaseBuilder::slotCancel() {
++  cancel = true;
++  labelStatus->setText(tr("Canceling..."));
++}
++
++void CSurfaceDatabaseBuilder::slotFinished() {
++  const QString res = watcher.result();
++  if (res.startsWith("ok:")) {
++    progress->setValue(1000);
++    labelStatus->setText(res.mid(3));
++    CUiTheme::markLabel(labelStatus, CUiTheme::Role::eOk);
++  } else {
++    labelStatus->setText(tr("Failed: %1").arg(res));
++    CUiTheme::markLabel(labelStatus, CUiTheme::Role::eError);
++  }
++  CSurfaceDbManager::self().rescan();
++  updateButtons();
++}
++
++void CSurfaceDatabaseBuilder::slotDatabasesChanged() {
++  treeDatabases->blockSignals(true);
++  treeDatabases->clear();
++  for (const CSurfaceDbManager::db_t& db : CSurfaceDbManager::self().getDatabases()) {
++    QTreeWidgetItem* item = new QTreeWidgetItem(treeDatabases);
++    item->setData(0, Qt::UserRole, db.file);
++    item->setText(3, QFileInfo(db.file).fileName());
++    if (!db.error.isEmpty()) {
++      item->setText(0, tr("unusable"));
++      item->setToolTip(0, db.error);
++      continue;
++    }
++    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
++    item->setCheckState(0, db.active ? Qt::Checked : Qt::Unchecked);
++    item->setText(0, db.name);
++    const QRectF& r = db.boundingBox;
++    item->setText(1, QString("%1..%2 N, %3..%4 E")
++                         .arg(r.top(), 0, 'f', 2)
++                         .arg(r.bottom(), 0, 'f', 2)
++                         .arg(r.left(), 0, 'f', 2)
++                         .arg(r.right(), 0, 'f', 2));
++    item->setText(2, db.osmTimestamp.isValid() ? QLocale().toString(db.osmTimestamp.toLocalTime(), QLocale::ShortFormat)
++                                               : tr("unknown"));
++    item->setToolTip(3,
++                     tr("%1\nfrom %2, built %3")
++                         .arg(db.file, db.source, QLocale().toString(db.created.toLocalTime(), QLocale::ShortFormat)));
++  }
++  for (int i = 0; i < treeDatabases->columnCount(); i++) {
++    treeDatabases->resizeColumnToContents(i);
++  }
++  treeDatabases->blockSignals(false);
++  updateButtons();
++}
++
++void CSurfaceDatabaseBuilder::slotItemChanged(QTreeWidgetItem* item, int column) {
++  if (column != 0) {
++    return;
++  }
++  const QString file = item->data(0, Qt::UserRole).toString();
++  const bool active = item->checkState(0) == Qt::Checked;
++  // the manager emits sigChanged(), which rebuilds the list: do it after this signal
++  QMetaObject::invokeMethod(
++      this, [file, active]() { CSurfaceDbManager::self().setActive(file, active); }, Qt::QueuedConnection);
++}
+diff --git a/src/qmapshack/tool/CSurfaceDatabaseBuilder.h b/src/qmapshack/tool/CSurfaceDatabaseBuilder.h
+new file mode 100644
+index 0000000..c1c6299
+--- /dev/null
++++ b/src/qmapshack/tool/CSurfaceDatabaseBuilder.h
+@@ -0,0 +1,72 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEDATABASEBUILDER_H
++#define CSURFACEDATABASEBUILDER_H
++
++#include <QFutureWatcher>
++#include <QWidget>
++#include <atomic>
++
++class QLabel;
++class QLineEdit;
++class QProgressBar;
++class QPushButton;
++class QTreeWidget;
++class QTreeWidgetItem;
++
++/**
++   @brief Tool tab to build surface databases from OpenStreetMap extracts and to choose the
++          active ones
++
++   The build runs in a worker thread (CSurfaceDbBuilder). Closing the tab cancels it.
++ */
++class CSurfaceDatabaseBuilder : public QWidget {
++  Q_OBJECT
++ public:
++  CSurfaceDatabaseBuilder(QWidget* parent);
++  virtual ~CSurfaceDatabaseBuilder();
++
++ private slots:
++  void slotSelectSource();
++  void slotSelectPath();
++  void slotStart();
++  void slotCancel();
++  void slotFinished();
++  void slotItemChanged(QTreeWidgetItem* item, int column);
++  void slotDatabasesChanged();
++  void updateButtons();
++
++ private:
++  QString targetFile() const;
++
++  QLineEdit* lineSource;
++  QLineEdit* lineName;
++  QLabel* labelPath;
++  QLabel* labelTarget;
++  QPushButton* pushStart;
++  QPushButton* pushCancel;
++  QProgressBar* progress;
++  QLabel* labelStatus;
++  QTreeWidget* treeDatabases;
++
++  QFutureWatcher<QString> watcher;
++  std::atomic_bool cancel = false;
++};
++
++#endif  // CSURFACEDATABASEBUILDER_H
+diff --git a/src/qmapshack/widgets/CColorLegend.cpp b/src/qmapshack/widgets/CColorLegend.cpp
+index 882a26f..126ccf7 100644
+--- a/src/qmapshack/widgets/CColorLegend.cpp
++++ b/src/qmapshack/widgets/CColorLegend.cpp
+@@ -23,6 +23,7 @@
+ #include "CMainWindow.h"
+ #include "gis/trk/CGisItemTrk.h"
+ #include "gis/trk/CKnownExtension.h"
++#include "gis/trk/surface/CSurface.h"
+ #include "helpers/CDraw.h"
+ 
+ CColorLegend::CColorLegend(QWidget* parent, CGisItemTrk* trk)
+@@ -54,6 +55,10 @@ void CColorLegend::setMouseFocus(const CTrackData::trkpt_t* pt) {
+   }
+ 
+   QString colorSource = trk->getColorizeSource();
++  if (CKnownExtension::isCategorical(colorSource)) {
++    val = NOFLOAT;
++    return;
++  }
+   auto valueFunc = CKnownExtension::get(colorSource).valueFunc;
+   const qreal factor = CKnownExtension::get(colorSource).factor;
+ 
+@@ -63,7 +68,13 @@ void CColorLegend::setMouseFocus(const CTrackData::trkpt_t* pt) {
+ }
+ 
+ void CColorLegend::updateData() {
+-  if (!trk->getColorizeSource().isEmpty() && (trk->getColorizeSource() != "activity")) {
++  const QString source = trk->getColorizeSource();
++  if (CKnownExtension::isCategorical(source)) {
++    categories = categoriesOf(source);
++    update();
++    show();
++  } else if (!source.isEmpty() && (source != "activity")) {
++    categories.clear();
+     unit = trk->getColorizeUnit();
+     minimum = trk->getColorizeLimitLow();
+     maximum = trk->getColorizeLimitHigh();
+@@ -85,6 +96,48 @@ void CColorLegend::setMaximum(qreal max) {
+   update();
+ }
+ 
++void CColorLegend::setCategories(const QList<category_t>& newCategories) {
++  categories = newCategories;
++  update();
++}
++
++QList<CColorLegend::category_t> CColorLegend::categoriesOf(const QString& source) {
++  QList<category_t> list;
++  if (source == CKnownExtension::internalSurface) {
++    for (int i = 0; i < CSurface::eClassCount; i++) {
++      list << category_t(CSurface::classColor(CSurface::class_e(i)), CSurface::className(CSurface::class_e(i)));
++    }
++  } else if (source == CKnownExtension::internalWayType) {
++    for (int i = 0; i < CSurface::eWayCount; i++) {
++      list << category_t(CSurface::wayTypeColor(CSurface::waytype_e(i)), CSurface::wayTypeName(CSurface::waytype_e(i)));
++    }
++  }
++  return list;
++}
++
++void CColorLegend::paintCategories(QPainter& p) {
++  const QFontMetrics fm(p.font());
++  const int lineHeight = fm.height() + 4;
++  int y = qMax(5, (height() - lineHeight * int(categories.size())) / 2);
++  int reqWidth = 0;
++  for (const category_t& category : std::as_const(categories)) {
++    const QRect swatch(xOffset, y + 2, colorWidth, fm.height());
++    p.setPen(QPen(palette().color(QPalette::WindowText), 1));
++    p.setBrush(category.first);
++    p.drawRect(swatch);
++    p.setPen(palette().color(QPalette::WindowText));
++    const int x = swatch.right() + 6;
++    p.drawText(x, y + 2 + fm.ascent(), category.second);
++    reqWidth = qMax(reqWidth, x + fm.horizontalAdvance(category.second));
++    y += lineHeight;
++  }
++
++  if (reqWidth + 5 != width()) {
++    setMinimumWidth(reqWidth + 5);
++    resize(reqWidth + 5, height());
++  }
++}
++
+ void CColorLegend::setUnit(const QString& unit) {
+   this->unit = unit;
+   update();
+@@ -150,6 +203,12 @@ void CColorLegend::paintEvent(QPaintEvent* /*event*/) {
+       p.setRenderHint(QPainter::Antialiasing, false);
+     }
+ 
++    if (!categories.isEmpty()) {
++      paintCategories(p);
++      p.end();
++      return;
++    }
++
+     // draw the black frame
+     QRect borderRect(colorRect);
+     borderRect += QMargins(1, 1, 1, 1);
+diff --git a/src/qmapshack/widgets/CColorLegend.h b/src/qmapshack/widgets/CColorLegend.h
+index 935f225..29bb62b 100644
+--- a/src/qmapshack/widgets/CColorLegend.h
++++ b/src/qmapshack/widgets/CColorLegend.h
+@@ -34,6 +34,12 @@ class CColorLegend : public QWidget, public INotifyTrk {
+ 
+   void setUnit(const QString& unit);
+ 
++  using category_t = QPair<QColor, QString>;
++  /// show these colors with their names instead of a gradient, empty: gradient
++  void setCategories(const QList<category_t>& categories);
++  /// the categories of a categorical color source (see CKnownExtension::isCategorical())
++  static QList<category_t> categoriesOf(const QString& source);
++
+   void updateData() override;
+   void setMouseFocus(const CTrackData::trkpt_t* pt) override;
+   void setMouseRangeFocus(const CTrackData::trkpt_t* /*pt1*/, const CTrackData::trkpt_t* /*pt2*/) override {}
+@@ -45,6 +51,7 @@ class CColorLegend : public QWidget, public INotifyTrk {
+ 
+  private:
+   int paintLabel(QPainter& p, qreal value);
++  void paintCategories(QPainter& p);
+ 
+   const int colorWidth = 18;
+   const int colorHeight = 256;
+@@ -57,6 +64,7 @@ class CColorLegend : public QWidget, public INotifyTrk {
+   int xOffset = 1;
+   CGisItemTrk* trk = nullptr;
+   qreal val = NOFLOAT;
++  QList<category_t> categories;
+ };
+ 
+ #endif  // CCOLORLEGEND_H

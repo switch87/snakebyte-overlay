@@ -1,0 +1,1955 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gert Pellin <gert@pellin.be>
+Date: Thu, 8 Oct 2026 20:43:05 +0200
+Subject: [PATCH 3/3] Surface analysis: follow the coding guideline
+
+One class per file (CSurfaceDbSet, CSurfaceBar), k-prefixed constants,
+explicit constructors, Qt integer types, markup kept out of tr(), no
+throwing static initializers, clang-tidy findings fixed. The Durbuy
+comparison test takes its data from environment variables only, and the
+reference implementation the test data was generated with is included.
+---
+ src/qmapshack/CMakeLists.txt                  |   4 +
+ src/qmapshack/gis/trk/CKnownExtension.cpp     |   4 +-
+ src/qmapshack/gis/trk/surface/CPbfReader.cpp  |  17 ++-
+ src/qmapshack/gis/trk/surface/CPbfReader.h    |   8 +-
+ src/qmapshack/gis/trk/surface/CSurface.cpp    | 133 ++++++++++--------
+ src/qmapshack/gis/trk/surface/CSurfaceBar.cpp |  78 ++++++++++
+ src/qmapshack/gis/trk/surface/CSurfaceBar.h   |  52 +++++++
+ src/qmapshack/gis/trk/surface/CSurfaceDb.cpp  |  86 +++--------
+ src/qmapshack/gis/trk/surface/CSurfaceDb.h    |  36 +----
+ .../gis/trk/surface/CSurfaceDbBuilder.cpp     |  24 ++--
+ .../gis/trk/surface/CSurfaceDbBuilder.h       |   6 +-
+ .../gis/trk/surface/CSurfaceDbManager.cpp     |   2 +-
+ .../gis/trk/surface/CSurfaceDbManager.h       |   2 +-
+ .../gis/trk/surface/CSurfaceDbSet.cpp         |  73 ++++++++++
+ src/qmapshack/gis/trk/surface/CSurfaceDbSet.h |  57 ++++++++
+ src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp |   2 +-
+ src/qmapshack/gis/trk/surface/CSurfaceTrk.h   |   4 +-
+ .../gis/trk/surface/CSurfaceWidget.cpp        |  87 +++---------
+ .../gis/trk/surface/CSurfaceWidget.h          |  31 +---
+ .../gis/trk/surface/test/CMakeLists.txt       |   1 +
+ .../surface/test/data/gen_classify_cases.py   |   5 +-
+ .../gis/trk/surface/test/data/make_fixture.py |  33 +++--
+ .../gis/trk/surface/test/data/osmsurface.py   | 109 ++++++++++++++
+ .../gis/trk/surface/test/test_CSurface.cpp    | 108 +++++++-------
+ .../surface/test/test_CSurfaceAnalyzer.cpp    |   8 +-
+ .../gis/trk/surface/test/test_CSurfaceDb.cpp  |  34 +++--
+ .../trk/surface/test/test_SurfaceDurbuy.cpp   |  40 +++---
+ src/qmapshack/locale/qmapshack_nl.ts          |  28 ++--
+ .../tool/CSurfaceDatabaseBuilder.cpp          |  19 +--
+ src/qmapshack/tool/CSurfaceDatabaseBuilder.h  |   4 +-
+ src/qms_surfacedb/main.cpp                    |   8 +-
+ 31 files changed, 677 insertions(+), 426 deletions(-)
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceBar.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceBar.h
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbSet.cpp
+ create mode 100644 src/qmapshack/gis/trk/surface/CSurfaceDbSet.h
+ create mode 100644 src/qmapshack/gis/trk/surface/test/data/osmsurface.py
+
+diff --git a/src/qmapshack/CMakeLists.txt b/src/qmapshack/CMakeLists.txt
+index bad14c9..5c8a2b1 100644
+--- a/src/qmapshack/CMakeLists.txt
++++ b/src/qmapshack/CMakeLists.txt
+@@ -143,9 +143,11 @@ set( SRCS
+     gis/trk/surface/CPbfReader.cpp
+     gis/trk/surface/CSurface.cpp
+     gis/trk/surface/CSurfaceAnalyzer.cpp
++    gis/trk/surface/CSurfaceBar.cpp
+     gis/trk/surface/CSurfaceDb.cpp
+     gis/trk/surface/CSurfaceDbBuilder.cpp
+     gis/trk/surface/CSurfaceDbManager.cpp
++    gis/trk/surface/CSurfaceDbSet.cpp
+     gis/trk/surface/CSurfaceTrk.cpp
+     gis/trk/surface/CSurfaceWidget.cpp
+     gis/trk/filter/CFilterChangeStartPoint.cpp
+@@ -538,9 +540,11 @@ set( HDRS
+     gis/trk/surface/CPbfReader.h
+     gis/trk/surface/CSurface.h
+     gis/trk/surface/CSurfaceAnalyzer.h
++    gis/trk/surface/CSurfaceBar.h
+     gis/trk/surface/CSurfaceDb.h
+     gis/trk/surface/CSurfaceDbBuilder.h
+     gis/trk/surface/CSurfaceDbManager.h
++    gis/trk/surface/CSurfaceDbSet.h
+     gis/trk/surface/CSurfaceTrk.h
+     gis/trk/surface/CSurfaceWidget.h
+     gis/trk/filter/CFilterChangeStartPoint.h
+diff --git a/src/qmapshack/gis/trk/CKnownExtension.cpp b/src/qmapshack/gis/trk/CKnownExtension.cpp
+index f62d5db..feaf532 100644
+--- a/src/qmapshack/gis/trk/CKnownExtension.cpp
++++ b/src/qmapshack/gis/trk/CKnownExtension.cpp
+@@ -239,10 +239,10 @@ QString CKnownExtension::toString(qreal value, bool withName, const QString& key
+   if (key == CKnownExtension::internalProgress) {
+     return str;
+   } else if (key == CKnownExtension::internalSurface) {
+-    str = (value >= 0 && value < int(CSurface::eClassCount)) ? CSurface::className(CSurface::class_e(qRound(value)))
++    str = (value >= 0 && value < qint32(CSurface::eClassCount)) ? CSurface::className(CSurface::class_e(qRound(value)))
+                                                              : "-";
+   } else if (key == CKnownExtension::internalWayType) {
+-    str = (value >= 0 && value < int(CSurface::eWayCount)) ? CSurface::wayTypeName(CSurface::waytype_e(qRound(value)))
++    str = (value >= 0 && value < qint32(CSurface::eWayCount)) ? CSurface::wayTypeName(CSurface::waytype_e(qRound(value)))
+                                                            : "-";
+   } else if (key.contains("speed")) {
+     QString v, u;
+diff --git a/src/qmapshack/gis/trk/surface/CPbfReader.cpp b/src/qmapshack/gis/trk/surface/CPbfReader.cpp
+index 9557e9b..f7f30e4 100644
+--- a/src/qmapshack/gis/trk/surface/CPbfReader.cpp
++++ b/src/qmapshack/gis/trk/surface/CPbfReader.cpp
+@@ -22,6 +22,9 @@
+ #include <stdexcept>
+ 
+ namespace {
++constexpr quint64 kMaxBlockSize = 64 * 1024 * 1024;
++constexpr quint32 kMaxHeaderSize = 64 * 1024;
++
+ // The few protobuf primitives the OSM PBF format needs.
+ class CProtoBuf {
+  public:
+@@ -32,7 +35,7 @@ class CProtoBuf {
+ 
+   quint64 varint() {
+     quint64 val = 0;
+-    for (int shift = 0; shift < 64; shift += 7) {
++    for (qint32 shift = 0; shift < 64; shift += 7) {
+       if (p >= end) {
+         throw std::runtime_error("truncated varint");
+       }
+@@ -254,7 +257,7 @@ bool CPbfReader::nextBlob(QByteArray& type, QByteArray& data) {
+       throw std::runtime_error("truncated block header");
+     }
+     const quint32 sizeHeader = qFromBigEndian<quint32>(len.constData());
+-    if (sizeHeader > 64 * 1024) {
++    if (sizeHeader > kMaxHeaderSize) {
+       throw std::runtime_error("block header too large");
+     }
+     const QByteArray header = file.read(sizeHeader);
+@@ -274,7 +277,7 @@ bool CPbfReader::nextBlob(QByteArray& type, QByteArray& data) {
+         bufHeader.skip(wire);
+       }
+     }
+-    if (sizeData > 64 * 1024 * 1024) {
++    if (sizeData > kMaxBlockSize) {
+       throw std::runtime_error("block too large");
+     }
+ 
+@@ -305,7 +308,7 @@ bool CPbfReader::nextBlob(QByteArray& type, QByteArray& data) {
+     if (!raw.isNull()) {
+       data = raw.toByteArray();
+     } else if (!zlib.isNull()) {
+-      if (rawSize > 64 * 1024 * 1024) {
++      if (rawSize > kMaxBlockSize) {
+         throw std::runtime_error("block too large");
+       }
+       // qUncompress() wants the expected size as big endian prefix
+@@ -353,6 +356,8 @@ void CPbfReader::parseHeaderBlock(const QByteArray& data, header_t& hdr) {
+           case 4:
+             hdr.bottom = deg;
+             break;
++          default:
++            break;
+         }
+       }
+       hdr.hasBBox = true;
+@@ -370,7 +375,7 @@ void CPbfReader::parseHeaderBlock(const QByteArray& data, header_t& hdr) {
+   }
+ }
+ 
+-void CPbfReader::parsePrimitiveBlock(const QByteArray& data, int what, const fNode& onNode, const fWay& onWay) {
++void CPbfReader::parsePrimitiveBlock(const QByteArray& data, qint32 what, const fNode& onNode, const fWay& onWay) {
+   CProtoBuf buf(data);
+   quint32 field, wire;
+   block_params_t params;
+@@ -430,7 +435,7 @@ void CPbfReader::parsePrimitiveBlock(const QByteArray& data, int what, const fNo
+   }
+ }
+ 
+-bool CPbfReader::readData(int what, const fNode& onNode, const fWay& onWay, const fProgress& progress) {
++bool CPbfReader::readData(qint32 what, const fNode& onNode, const fWay& onWay, const fProgress& progress) {
+   if (!file.isOpen() || !file.seek(posData)) {
+     error = "PBF file is not open";
+     return false;
+diff --git a/src/qmapshack/gis/trk/surface/CPbfReader.h b/src/qmapshack/gis/trk/surface/CPbfReader.h
+index d8cbc8e..9434a6e 100644
+--- a/src/qmapshack/gis/trk/surface/CPbfReader.h
++++ b/src/qmapshack/gis/trk/surface/CPbfReader.h
+@@ -64,8 +64,8 @@ class CPbfReader {
+   /// called after each block with the file position, return false to abort
+   using fProgress = std::function<bool(qint64 pos)>;
+ 
+-  CPbfReader(const QString& filename);
+-  virtual ~CPbfReader() = default;
++  explicit CPbfReader(const QString& filename);
++  ~CPbfReader() = default;
+ 
+   /// open the file and read its header block
+   bool open();
+@@ -81,10 +81,10 @@ class CPbfReader {
+      @param progress  called after each block, may be empty
+      @return false on error or abort, see errorString()
+    */
+-  bool readData(int what, const fNode& onNode, const fWay& onWay, const fProgress& progress);
++  bool readData(qint32 what, const fNode& onNode, const fWay& onWay, const fProgress& progress);
+ 
+   /// decompress and parse a single PrimitiveBlock (exposed for tests)
+-  static void parsePrimitiveBlock(const QByteArray& data, int what, const fNode& onNode, const fWay& onWay);
++  static void parsePrimitiveBlock(const QByteArray& data, qint32 what, const fNode& onNode, const fWay& onWay);
+   static void parseHeaderBlock(const QByteArray& data, header_t& hdr);
+ 
+  private:
+diff --git a/src/qmapshack/gis/trk/surface/CSurface.cpp b/src/qmapshack/gis/trk/surface/CSurface.cpp
+index f145785..62e6ac3 100644
+--- a/src/qmapshack/gis/trk/surface/CSurface.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurface.cpp
+@@ -27,80 +27,89 @@ struct surface_t {
+ };
+ 
+ // OSM surface=* values; anything not listed falls back to the highway's assumption
+-const QHash<QString, surface_t> surfaces = {
+-    {"asphalt", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
+-    {"paved", {CSurface::eLabelPaved, CSurface::eClassPaved}},
+-    {"chipseal", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
+-    {"concrete", {CSurface::eLabelConcrete, CSurface::eClassPaved}},
+-    {"concrete:lanes", {CSurface::eLabelConcreteLanes, CSurface::eClassPaved}},
+-    {"concrete:plates", {CSurface::eLabelConcretePlates, CSurface::eClassPaved}},
+-    {"paving_stones", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
+-    {"sett", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
+-    {"cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
+-    {"unhewn_cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
+-    {"bricks", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
+-    {"metal", {CSurface::eLabelMetal, CSurface::eClassPaved}},
+-    {"wood", {CSurface::eLabelWood, CSurface::eClassPaved}},
+-    {"compacted", {CSurface::eLabelCompacted, CSurface::eClassSemiPaved}},
+-    {"fine_gravel", {CSurface::eLabelFineGravel, CSurface::eClassSemiPaved}},
+-    {"gravel", {CSurface::eLabelGravel, CSurface::eClassSemiPaved}},
+-    {"pebblestone", {CSurface::eLabelPebblestone, CSurface::eClassSemiPaved}},
+-    {"grass_paver", {CSurface::eLabelGrassPaver, CSurface::eClassSemiPaved}},
+-    {"unpaved", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
+-    {"dirt", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
+-    {"earth", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
+-    {"ground", {CSurface::eLabelGround, CSurface::eClassUnpaved}},
+-    {"grass", {CSurface::eLabelGrass, CSurface::eClassUnpaved}},
+-    {"mud", {CSurface::eLabelMud, CSurface::eClassUnpaved}},
+-    {"sand", {CSurface::eLabelSand, CSurface::eClassUnpaved}},
+-    {"woodchips", {CSurface::eLabelWoodchips, CSurface::eClassUnpaved}},
+-    {"rock", {CSurface::eLabelRock, CSurface::eClassUnpaved}},
+-    {"stepping_stones", {CSurface::eLabelSteppingStones, CSurface::eClassUnpaved}},
+-};
++const QHash<QString, surface_t>& surfaces() {
++  static const QHash<QString, surface_t> table = {
++      {"asphalt", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
++      {"paved", {CSurface::eLabelPaved, CSurface::eClassPaved}},
++      {"chipseal", {CSurface::eLabelAsphalt, CSurface::eClassPaved}},
++      {"concrete", {CSurface::eLabelConcrete, CSurface::eClassPaved}},
++      {"concrete:lanes", {CSurface::eLabelConcreteLanes, CSurface::eClassPaved}},
++      {"concrete:plates", {CSurface::eLabelConcretePlates, CSurface::eClassPaved}},
++      {"paving_stones", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
++      {"sett", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++      {"cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++      {"unhewn_cobblestone", {CSurface::eLabelCobblestone, CSurface::eClassPaved}},
++      {"bricks", {CSurface::eLabelPavingStones, CSurface::eClassPaved}},
++      {"metal", {CSurface::eLabelMetal, CSurface::eClassPaved}},
++      {"wood", {CSurface::eLabelWood, CSurface::eClassPaved}},
++      {"compacted", {CSurface::eLabelCompacted, CSurface::eClassSemiPaved}},
++      {"fine_gravel", {CSurface::eLabelFineGravel, CSurface::eClassSemiPaved}},
++      {"gravel", {CSurface::eLabelGravel, CSurface::eClassSemiPaved}},
++      {"pebblestone", {CSurface::eLabelPebblestone, CSurface::eClassSemiPaved}},
++      {"grass_paver", {CSurface::eLabelGrassPaver, CSurface::eClassSemiPaved}},
++      {"unpaved", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++      {"dirt", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
++      {"earth", {CSurface::eLabelDirt, CSurface::eClassUnpaved}},
++      {"ground", {CSurface::eLabelGround, CSurface::eClassUnpaved}},
++      {"grass", {CSurface::eLabelGrass, CSurface::eClassUnpaved}},
++      {"mud", {CSurface::eLabelMud, CSurface::eClassUnpaved}},
++      {"sand", {CSurface::eLabelSand, CSurface::eClassUnpaved}},
++      {"woodchips", {CSurface::eLabelWoodchips, CSurface::eClassUnpaved}},
++      {"rock", {CSurface::eLabelRock, CSurface::eClassUnpaved}},
++      {"stepping_stones", {CSurface::eLabelSteppingStones, CSurface::eClassUnpaved}},
++  };
++  return table;
++}
+ 
+-const QHash<QString, surface_t> tracktypes = {
+-    {"grade1", {CSurface::eLabelPaved, CSurface::eClassPaved}},
+-    {"grade2", {CSurface::eLabelSemiPaved, CSurface::eClassSemiPaved}},
+-    {"grade3", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
+-    {"grade4", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
+-    {"grade5", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
+-};
++const QHash<QString, surface_t>& tracktypes() {
++  static const QHash<QString, surface_t> table = {
++      {"grade1", {CSurface::eLabelPaved, CSurface::eClassPaved}},
++      {"grade2", {CSurface::eLabelSemiPaved, CSurface::eClassSemiPaved}},
++      {"grade3", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++      {"grade4", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++      {"grade5", {CSurface::eLabelUnpaved, CSurface::eClassUnpaved}},
++  };
++  return table;
++}
+ 
+-const QHash<QString, CSurface::waytype_e> waytypes = {
+-    {"path", CSurface::eWayPath},
+-    {"footway", CSurface::eWayPath},
+-    {"bridleway", CSurface::eWayPath},
+-    {"steps", CSurface::eWaySteps},
+-    {"track", CSurface::eWayTrack},
+-    {"cycleway", CSurface::eWayCycleway},
+-    {"residential", CSurface::eWayStreet},
+-    {"living_street", CSurface::eWayStreet},
+-    {"pedestrian", CSurface::eWayStreet},
+-    {"unclassified", CSurface::eWayRoad},
+-    {"service", CSurface::eWayRoad},
+-    {"tertiary", CSurface::eWayRoad},
+-    {"tertiary_link", CSurface::eWayRoad},
+-    {"secondary", CSurface::eWayBusyRoad},
+-    {"secondary_link", CSurface::eWayBusyRoad},
+-    {"primary", CSurface::eWayBusyRoad},
+-    {"primary_link", CSurface::eWayBusyRoad},
+-    {"trunk", CSurface::eWayBusyRoad},
+-};
++const QHash<QString, CSurface::waytype_e>& waytypes() {
++  static const QHash<QString, CSurface::waytype_e> table = {
++      {"path", CSurface::eWayPath},
++      {"footway", CSurface::eWayPath},
++      {"bridleway", CSurface::eWayPath},
++      {"steps", CSurface::eWaySteps},
++      {"track", CSurface::eWayTrack},
++      {"cycleway", CSurface::eWayCycleway},
++      {"residential", CSurface::eWayStreet},
++      {"living_street", CSurface::eWayStreet},
++      {"pedestrian", CSurface::eWayStreet},
++      {"unclassified", CSurface::eWayRoad},
++      {"service", CSurface::eWayRoad},
++      {"tertiary", CSurface::eWayRoad},
++      {"tertiary_link", CSurface::eWayRoad},
++      {"secondary", CSurface::eWayBusyRoad},
++      {"secondary_link", CSurface::eWayBusyRoad},
++      {"primary", CSurface::eWayBusyRoad},
++      {"primary_link", CSurface::eWayBusyRoad},
++      {"trunk", CSurface::eWayBusyRoad},
++  };
++  return table;
++}
+ }  // namespace
+ 
+-CSurface::waytype_e CSurface::wayType(const QString& highway) { return waytypes.value(highway, eWayOther); }
++CSurface::waytype_e CSurface::wayType(const QString& highway) { return waytypes().value(highway, eWayOther); }
+ 
+ CSurface::info_t CSurface::classify(const tags_t& tags) {
+   const waytype_e way = wayType(tags.highway);
+ 
+-  auto surface = surfaces.constFind(tags.surface);
+-  if (surface != surfaces.constEnd()) {
++  auto surface = surfaces().constFind(tags.surface);
++  if (surface != surfaces().constEnd()) {
+     return {surface->label, surface->cls, way};
+   }
+ 
+   if (tags.highway == "track") {
+-    auto tracktype = tracktypes.constFind(tags.tracktype);
+-    if (tracktype != tracktypes.constEnd()) {
++    auto tracktype = tracktypes().constFind(tags.tracktype);
++    if (tracktype != tracktypes().constEnd()) {
+       return {tracktype->label, tracktype->cls, way};
+     }
+     return {eLabelUnknown, eClassUnknown, way};
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceBar.cpp b/src/qmapshack/gis/trk/surface/CSurfaceBar.cpp
+new file mode 100644
+index 0000000..ca96b55
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceBar.cpp
+@@ -0,0 +1,78 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceBar.h"
++
++#include <QtWidgets>
++
++CSurfaceBar::CSurfaceBar(QWidget* parent) : QWidget(parent) {
++  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++}
++
++void CSurfaceBar::setParts(const QList<part_t>& newParts) {
++  parts = newParts;
++  total = 0;
++  for (const part_t& part : std::as_const(parts)) {
++    total += part.value;
++  }
++  update();
++}
++
++QSize CSurfaceBar::sizeHint() const { return QSize(200, fontMetrics().height()); }
++
++QSize CSurfaceBar::minimumSizeHint() const { return QSize(50, fontMetrics().height()); }
++
++void CSurfaceBar::paintEvent(QPaintEvent*) {
++  QPainter p(this);
++  p.setRenderHint(QPainter::Antialiasing);
++  const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
++
++  QPainterPath clip;
++  clip.addRoundedRect(r, 3, 3);
++  p.setClipPath(clip);
++
++  qreal x = r.left();
++  for (const part_t& part : std::as_const(parts)) {
++    if (total <= 0 || part.value <= 0) {
++      continue;
++    }
++    const qreal w = r.width() * part.value / total;
++    p.fillRect(QRectF(x, r.top(), w, r.height()), part.color);
++    x += w;
++  }
++
++  p.setClipping(false);
++  p.setPen(QPen(palette().color(QPalette::Mid), 1));
++  p.setBrush(Qt::NoBrush);
++  p.drawRoundedRect(r, 3, 3);
++}
++
++bool CSurfaceBar::event(QEvent* e) {
++  if (e->type() == QEvent::ToolTip && total > 0) {
++    QHelpEvent* help = static_cast<QHelpEvent*>(e);
++    qreal x = 0;
++    for (const part_t& part : std::as_const(parts)) {
++      x += width() * part.value / total;
++      if (help->pos().x() <= x) {
++        QToolTip::showText(help->globalPos(), part.text, this);
++        return true;
++      }
++    }
++  }
++  return QWidget::event(e);
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceBar.h b/src/qmapshack/gis/trk/surface/CSurfaceBar.h
+new file mode 100644
+index 0000000..8506382
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceBar.h
+@@ -0,0 +1,52 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEBAR_H
++#define CSURFACEBAR_H
++
++#include <QColor>
++#include <QList>
++#include <QWidget>
++
++/// a horizontal bar of colored parts, e.g. the shares of the surface classes
++class CSurfaceBar : public QWidget {
++  Q_OBJECT
++ public:
++  explicit CSurfaceBar(QWidget* parent);
++  ~CSurfaceBar() override = default;
++
++  struct part_t {
++    QColor color;
++    qreal value;
++    QString text;  ///< tooltip
++  };
++  void setParts(const QList<part_t>& parts);
++
++  QSize sizeHint() const override;
++  QSize minimumSizeHint() const override;
++
++ protected:
++  void paintEvent(QPaintEvent* e) override;
++  bool event(QEvent* e) override;
++
++ private:
++  QList<part_t> parts;
++  qreal total = 0;
++};
++
++#endif  // CSURFACEBAR_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
+index 381876a..6c3f325 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDb.cpp
+@@ -45,7 +45,7 @@ CSurfaceDb::CSurfaceDb(const QString& filename) : file(filename) {
+     while (query.next()) {
+       meta[query.value(0).toString()] = query.value(1).toString();
+     }
+-    if (meta.value("schema").toInt() != schemaVersion) {
++    if (meta.value("schema").toInt() != kSchemaVersion) {
+       error = QString("Unsupported surface database version %1").arg(meta.value("schema"));
+       return;
+     }
+@@ -109,11 +109,11 @@ QDateTime CSurfaceDb::created() const { return QDateTime::fromString(meta.value(
+ qint64 CSurfaceDb::chunkCount() const { return meta.value("chunks").toLongLong(); }
+ 
+ qreal CSurfaceDb::distance(qreal lat1, qreal lon1, qreal lat2, qreal lon2) {
+-  constexpr qreal degToRad = M_PI / 180.0;
+-  const qreal la1 = lat1 * degToRad;
+-  const qreal lo1 = lon1 * degToRad;
+-  const qreal la2 = lat2 * degToRad;
+-  const qreal lo2 = lon2 * degToRad;
++  constexpr qreal kDegToRad = M_PI / 180.0;
++  const qreal la1 = lat1 * kDegToRad;
++  const qreal lo1 = lon1 * kDegToRad;
++  const qreal la2 = lat2 * kDegToRad;
++  const qreal lo2 = lon2 * kDegToRad;
+   const qreal h =
+       std::pow(std::sin((la2 - la1) / 2), 2) + std::cos(la1) * std::cos(la2) * std::pow(std::sin((lo2 - lo1) / 2), 2);
+   return 2 * 6371000.0 * std::asin(std::sqrt(h));
+@@ -121,8 +121,8 @@ qreal CSurfaceDb::distance(qreal lat1, qreal lon1, qreal lat2, qreal lon2) {
+ 
+ void CSurfaceDb::cell(qreal lat, qreal lon, qint64& row, qint64& col) {
+   // nearbyint() rounds half to even, like Python's round()
+-  row = qint64(std::nearbyint(lat * cellsPerDegLat));
+-  col = qint64(std::nearbyint(lon * cellsPerDegLon));
++  row = qint64(std::nearbyint(lat * kCellsPerDegLat));
++  col = qint64(std::nearbyint(lon * kCellsPerDegLon));
+ }
+ 
+ bool CSurfaceDb::query(qreal south, qreal north, qreal west, qreal east, QVector<chunk_t>& chunks) {
+@@ -163,11 +163,11 @@ std::optional<CSurface::info_t> CSurfaceDb::lookupCell(qreal lat, qreal lon) {
+     return *cached < 0 ? std::nullopt : std::optional<CSurface::info_t>(infoByKey[*cached]);
+   }
+ 
+-  constexpr qreal margin = 1e-6;
+-  const qreal south = (row - 0.5) / cellsPerDegLat - margin;
+-  const qreal north = (row + 0.5) / cellsPerDegLat + margin;
+-  const qreal west = (col - 0.5) / cellsPerDegLon - margin;
+-  const qreal east = (col + 0.5) / cellsPerDegLon + margin;
++  constexpr qreal kMargin = 1e-6;
++  const qreal south = (row - 0.5) / kCellsPerDegLat - kMargin;
++  const qreal north = (row + 0.5) / kCellsPerDegLat + kMargin;
++  const qreal west = (col - 0.5) / kCellsPerDegLon - kMargin;
++  const qreal east = (col + 0.5) / kCellsPerDegLon + kMargin;
+ 
+   QVector<chunk_t> chunks;
+   if (!query(south, north, west, east, chunks)) {
+@@ -235,9 +235,9 @@ std::optional<CSurface::info_t> CSurfaceDb::lookupNearest(qreal lat, qreal lon,
+   }
+ 
+   // local equirectangular projection in meters around the position
+-  constexpr qreal mPerDeg = 6371000.0 * M_PI / 180.0;
+-  const qreal mPerDegLon = mPerDeg * qCos(qDegreesToRadians(lat));
+-  const qreal dLat = maxDist / mPerDeg * 1.01;
++  constexpr qreal kMPerDeg = 6371000.0 * M_PI / 180.0;
++  const qreal mPerDegLon = kMPerDeg * qCos(qDegreesToRadians(lat));
++  const qreal dLat = maxDist / kMPerDeg * 1.01;
+   const qreal dLon = maxDist / mPerDegLon * 1.01;
+ 
+   QVector<chunk_t> chunks;
+@@ -251,9 +251,9 @@ std::optional<CSurface::info_t> CSurfaceDb::lookupNearest(qreal lat, qreal lon,
+     const qsizetype n = chunk.nodes.size() / 2;
+     for (qsizetype j = 0; j + 1 < n; j++) {
+       const qreal x1 = (chunk.nodes[2 * j + 1] / 1e7 - lon) * mPerDegLon;
+-      const qreal y1 = (chunk.nodes[2 * j] / 1e7 - lat) * mPerDeg;
++      const qreal y1 = (chunk.nodes[2 * j] / 1e7 - lat) * kMPerDeg;
+       const qreal x2 = (chunk.nodes[2 * j + 3] / 1e7 - lon) * mPerDegLon;
+-      const qreal y2 = (chunk.nodes[2 * j + 2] / 1e7 - lat) * mPerDeg;
++      const qreal y2 = (chunk.nodes[2 * j + 2] / 1e7 - lat) * kMPerDeg;
+ 
+       const qreal dx = x2 - x1;
+       const qreal dy = y2 - y1;
+@@ -273,53 +273,3 @@ std::optional<CSurface::info_t> CSurfaceDb::lookupNearest(qreal lat, qreal lon,
+   }
+   return infoByTag[bestTag];
+ }
+-
+-CSurfaceDbSet::CSurfaceDbSet(const QStringList& files) {
+-  for (const QString& file : files) {
+-    CSurfaceDb* db = new CSurfaceDb(file);
+-    if (db->isValid()) {
+-      dbs << db;
+-    } else {
+-      qWarning() << "Surface database" << file << db->errorString();
+-      delete db;
+-    }
+-  }
+-}
+-
+-CSurfaceDbSet::~CSurfaceDbSet() { qDeleteAll(dbs); }
+-
+-bool CSurfaceDbSet::covers(const QRectF& area) const {
+-  for (const CSurfaceDb* db : dbs) {
+-    if (db->boundingBox().intersects(area) || db->boundingBox().contains(area.center())) {
+-      return true;
+-    }
+-  }
+-  return false;
+-}
+-
+-std::optional<CSurface::info_t> CSurfaceDbSet::lookup(qreal lat, qreal lon, qreal fallbackDist) {
+-  // a little slack: a way just outside the data's box can still pass the cell
+-  constexpr qreal slack = 0.001;
+-  QList<CSurfaceDb*> candidates;
+-  for (CSurfaceDb* db : std::as_const(dbs)) {
+-    if (db->boundingBox().adjusted(-slack, -slack, slack, slack).contains(QPointF(lon, lat))) {
+-      candidates << db;
+-    }
+-  }
+-
+-  for (CSurfaceDb* db : std::as_const(candidates)) {
+-    std::optional<CSurface::info_t> info = db->lookupCell(lat, lon);
+-    if (info) {
+-      return info;
+-    }
+-  }
+-
+-  for (CSurfaceDb* db : std::as_const(candidates)) {
+-    std::optional<CSurface::info_t> info = db->lookupNearest(lat, lon, fallbackDist);
+-    if (info) {
+-      return info;
+-    }
+-  }
+-
+-  return std::nullopt;
+-}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDb.h b/src/qmapshack/gis/trk/surface/CSurfaceDb.h
+index 3244dfe..09337db 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDb.h
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDb.h
+@@ -47,14 +47,14 @@
+  */
+ class CSurfaceDb {
+  public:
+-  static constexpr qint32 schemaVersion = 1;
++  static constexpr qint32 kSchemaVersion = 1;
+   /// edge length of a lookup cell in degrees latitude (~20 m)
+-  static constexpr qreal cellsPerDegLat = 5500;
++  static constexpr qreal kCellsPerDegLat = 5500;
+   /// edge length of a lookup cell in degrees longitude (~20 m at 50 deg N)
+-  static constexpr qreal cellsPerDegLon = 3500;
++  static constexpr qreal kCellsPerDegLon = 3500;
+ 
+-  CSurfaceDb(const QString& filename);
+-  virtual ~CSurfaceDb();
++  explicit CSurfaceDb(const QString& filename);
++  ~CSurfaceDb();
+ 
+   bool isValid() const { return valid; }
+   QString errorString() const { return error; }
+@@ -114,30 +114,4 @@ class CSurfaceDb {
+   QHash<QPair<qint64, qint64>, qint32> cacheCells;
+ };
+ 
+-/**
+-   @brief All active surface databases, used together
+-
+-   Like CSurfaceDb, an object must stay in the thread it was created in.
+- */
+-class CSurfaceDbSet {
+- public:
+-  CSurfaceDbSet(const QStringList& files);
+-  virtual ~CSurfaceDbSet();
+-
+-  /// true if any database's area intersects the rectangle (x = longitude, y = latitude)
+-  bool covers(const QRectF& area) const;
+-  bool isEmpty() const { return dbs.isEmpty(); }
+-
+-  /**
+-     @brief The way at a position
+-
+-     First the cell majority (CSurfaceDb::lookupCell()) of the first database containing the
+-     position; if no way passes the cell, the nearest way within fallbackDist meters.
+-   */
+-  std::optional<CSurface::info_t> lookup(qreal lat, qreal lon, qreal fallbackDist);
+-
+- private:
+-  QList<CSurfaceDb*> dbs;
+-};
+-
+ #endif  // CSURFACEDB_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
+index 9f3cef5..bcbd0fc 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.cpp
+@@ -34,8 +34,6 @@
+ #include "gis/trk/surface/CPbfReader.h"
+ #include "gis/trk/surface/CSurfaceDb.h"
+ 
+-const QString CSurfaceDbBuilder::suffix = "surface.sqlite";
+-
+ CSurfaceDbBuilder::CSurfaceDbBuilder(const options_t& options) : opts(options) {}
+ 
+ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool* cancel) {
+@@ -73,7 +71,7 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+         bool isHighway = false;
+         for (qsizetype i = 0; i < way.keys.size(); i++) {
+           const QByteArray& key = strings[way.keys[i]];
+-          int idx = -1;
++          qint32 idx = -1;
+           if (key == "highway") {
+             idx = 0;
+             isHighway = true;
+@@ -124,9 +122,9 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+   std::vector<qint64> needed(refs);
+   std::sort(needed.begin(), needed.end());
+   needed.erase(std::unique(needed.begin(), needed.end()), needed.end());
+-  constexpr qint32 invalid = std::numeric_limits<qint32>::min();
+-  std::vector<qint32> lats(needed.size(), invalid);
+-  std::vector<qint32> lons(needed.size(), invalid);
++  constexpr qint32 kInvalid = std::numeric_limits<qint32>::min();
++  std::vector<qint32> lats(needed.size(), kInvalid);
++  std::vector<qint32> lons(needed.size(), kInvalid);
+ 
+   size_t cursor = 0;
+   ok = reader.readData(
+@@ -190,7 +188,7 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+       insertTag.prepare("INSERT INTO tags (id, highway, surface, tracktype, footway) VALUES (?, ?, ?, ?, ?)");
+       for (qint32 i = 0; i < tags.size() && error.isEmpty(); i++) {
+         insertTag.bindValue(0, i);
+-        for (int j = 0; j < 4; j++) {
++        for (qint32 j = 0; j < 4; j++) {
+           insertTag.bindValue(j + 1, tags[i][j]);
+         }
+         exec(insertTag);
+@@ -203,8 +201,8 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+       insertIndex.prepare("INSERT INTO chunk_index (id, minLat, maxLat, minLon, maxLon) VALUES (?, ?, ?, ?, ?)");
+ 
+       const bool filter = opts.area.isValid();
+-      qint32 minLat = std::numeric_limits<qint32>::max(), maxLat = invalid;
+-      qint32 minLon = std::numeric_limits<qint32>::max(), maxLon = invalid;
++      qint32 minLat = std::numeric_limits<qint32>::max(), maxLat = kInvalid;
++      qint32 minLon = std::numeric_limits<qint32>::max(), maxLon = kInvalid;
+       std::vector<qint32> nodes;
+       const size_t ways = wayId.size();
+       for (size_t w = 0; w < ways && error.isEmpty(); w++) {
+@@ -220,7 +218,7 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+         bool inside = !filter;
+         for (qint64 r = wayStart[w]; r < wayStart[w + 1]; r++) {
+           const size_t idx = size_t(std::lower_bound(needed.begin(), needed.end(), refs[r]) - needed.begin());
+-          if (lats[idx] == invalid) {
++          if (lats[idx] == kInvalid) {
+             continue;  // node missing in the extract
+           }
+           nodes.push_back(lats[idx]);
+@@ -240,8 +238,8 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+         for (qint64 start = 0; start < n - 1 && error.isEmpty(); start += opts.chunkSegments) {
+           const qint64 end = qMin<qint64>(start + opts.chunkSegments, n - 1);
+           QByteArray blob((end - start + 1) * 2 * sizeof(qint32), Qt::Uninitialized);
+-          qint32 cMinLat = std::numeric_limits<qint32>::max(), cMaxLat = invalid;
+-          qint32 cMinLon = std::numeric_limits<qint32>::max(), cMaxLon = invalid;
++          qint32 cMinLat = std::numeric_limits<qint32>::max(), cMaxLat = kInvalid;
++          qint32 cMinLon = std::numeric_limits<qint32>::max(), cMaxLon = kInvalid;
+           for (qint64 k = start; k <= end; k++) {
+             const qint32 lat = nodes[2 * k];
+             const qint32 lon = nodes[2 * k + 1];
+@@ -282,7 +280,7 @@ bool CSurfaceDbBuilder::build(const fProgress& progress, const std::atomic_bool*
+       QSqlQuery insertMeta(db);
+       insertMeta.prepare("INSERT INTO meta (key, value) VALUES (?, ?)");
+       const QList<QPair<QString, QString>> meta = {
+-          {"schema", QString::number(CSurfaceDb::schemaVersion)},
++          {"schema", QString::number(CSurfaceDb::kSchemaVersion)},
+           {"name", opts.name},
+           {"source", QFileInfo(opts.pbf).fileName()},
+           {"osmTimestamp", QString::number(hdr.timestamp)},
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
+index 78e67f9..b0432d4 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbBuilder.h
+@@ -54,10 +54,10 @@ class CSurfaceDbBuilder {
+   using fProgress = std::function<void(qreal fraction, const QString& step)>;
+ 
+   /// the file extension of surface databases
+-  static const QString suffix;
++  static QString suffix() { return "surface.sqlite"; }
+ 
+-  CSurfaceDbBuilder(const options_t& options);
+-  virtual ~CSurfaceDbBuilder() = default;
++  explicit CSurfaceDbBuilder(const options_t& options);
++  ~CSurfaceDbBuilder() = default;
+ 
+   /// @return false on error or cancel, see errorString()
+   bool build(const fProgress& progress, const std::atomic_bool* cancel = nullptr);
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
+index bbafb99..7325d64 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.cpp
+@@ -82,7 +82,7 @@ void CSurfaceDbManager::setActive(const QString& file, bool yes) {
+ void CSurfaceDbManager::rescan() {
+   QList<db_t> found;
+   const QDir dir(path);
+-  const QStringList files = dir.entryList({"*." + CSurfaceDbBuilder::suffix}, QDir::Files, QDir::Name);
++  const QStringList files = dir.entryList({"*." + CSurfaceDbBuilder::suffix()}, QDir::Files, QDir::Name);
+   for (const QString& name : files) {
+     db_t entry;
+     entry.file = dir.absoluteFilePath(name);
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
+index 6211cd6..ba52c3a 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbManager.h
+@@ -35,7 +35,7 @@ class CSurfaceDbManager : public QObject {
+   Q_OBJECT
+  public:
+   static CSurfaceDbManager& self();
+-  virtual ~CSurfaceDbManager() = default;
++  ~CSurfaceDbManager() override = default;
+ 
+   struct db_t {
+     QString file;
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbSet.cpp b/src/qmapshack/gis/trk/surface/CSurfaceDbSet.cpp
+new file mode 100644
+index 0000000..f18206c
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbSet.cpp
+@@ -0,0 +1,73 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#include "gis/trk/surface/CSurfaceDbSet.h"
++
++#include <QDebug>
++
++#include "gis/trk/surface/CSurfaceDb.h"
++
++CSurfaceDbSet::CSurfaceDbSet(const QStringList& files) {
++  for (const QString& file : files) {
++    CSurfaceDb* db = new CSurfaceDb(file);
++    if (db->isValid()) {
++      dbs << db;
++    } else {
++      qWarning() << "Surface database" << file << db->errorString();
++      delete db;
++    }
++  }
++}
++
++CSurfaceDbSet::~CSurfaceDbSet() { qDeleteAll(dbs); }
++
++bool CSurfaceDbSet::covers(const QRectF& area) const {
++  for (const CSurfaceDb* db : dbs) {
++    if (db->boundingBox().intersects(area) || db->boundingBox().contains(area.center())) {
++      return true;
++    }
++  }
++  return false;
++}
++
++std::optional<CSurface::info_t> CSurfaceDbSet::lookup(qreal lat, qreal lon, qreal fallbackDist) {
++  // a little kSlack: a way just outside the data's box can still pass the cell
++  constexpr qreal kSlack = 0.001;
++  QList<CSurfaceDb*> candidates;
++  for (CSurfaceDb* db : std::as_const(dbs)) {
++    if (db->boundingBox().adjusted(-kSlack, -kSlack, kSlack, kSlack).contains(QPointF(lon, lat))) {
++      candidates << db;
++    }
++  }
++
++  for (CSurfaceDb* db : std::as_const(candidates)) {
++    std::optional<CSurface::info_t> info = db->lookupCell(lat, lon);
++    if (info) {
++      return info;
++    }
++  }
++
++  for (CSurfaceDb* db : std::as_const(candidates)) {
++    std::optional<CSurface::info_t> info = db->lookupNearest(lat, lon, fallbackDist);
++    if (info) {
++      return info;
++    }
++  }
++
++  return std::nullopt;
++}
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceDbSet.h b/src/qmapshack/gis/trk/surface/CSurfaceDbSet.h
+new file mode 100644
+index 0000000..0c10433
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/CSurfaceDbSet.h
+@@ -0,0 +1,57 @@
++/**********************************************************************************************
++    Copyright (C) 2026 Gert Pellin <gert@pellin.be>
++
++    This program is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++**********************************************************************************************/
++
++#ifndef CSURFACEDBSET_H
++#define CSURFACEDBSET_H
++
++#include <QList>
++#include <QRectF>
++#include <QStringList>
++#include <optional>
++
++#include "gis/trk/surface/CSurface.h"
++
++class CSurfaceDb;
++
++/**
++   @brief All active surface databases, used together
++
++   Like CSurfaceDb, an object must stay in the thread it was created in.
++ */
++class CSurfaceDbSet {
++ public:
++  explicit CSurfaceDbSet(const QStringList& files);
++  ~CSurfaceDbSet();
++
++  /// true if any database's area intersects the rectangle (x = longitude, y = latitude)
++  bool covers(const QRectF& area) const;
++  bool isEmpty() const { return dbs.isEmpty(); }
++
++  /**
++     @brief The way at a position
++
++     First the cell majority (CSurfaceDb::lookupCell()) of the first database containing the
++     position; if no way passes the cell, the nearest way within fallbackDist meters.
++   */
++  std::optional<CSurface::info_t> lookup(qreal lat, qreal lon, qreal fallbackDist);
++
++ private:
++  QList<CSurfaceDb*> dbs;
++};
++
++#endif  // CSURFACEDBSET_H
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp b/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
+index 2e835a5..57ff206 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurfaceTrk.cpp
+@@ -24,8 +24,8 @@
+ 
+ #include "canvas/CCanvas.h"
+ #include "gis/trk/CGisItemTrk.h"
+-#include "gis/trk/surface/CSurfaceDb.h"
+ #include "gis/trk/surface/CSurfaceDbManager.h"
++#include "gis/trk/surface/CSurfaceDbSet.h"
+ 
+ static QThreadPool& pool() {
+   // each job opens its own database connections, a few in parallel are plenty
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceTrk.h b/src/qmapshack/gis/trk/surface/CSurfaceTrk.h
+index c81db21..e2aedaf 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceTrk.h
++++ b/src/qmapshack/gis/trk/surface/CSurfaceTrk.h
+@@ -46,8 +46,8 @@ class CSurfaceTrk : public QObject {
+     eStateReady        ///< getResult() is valid
+   };
+ 
+-  CSurfaceTrk(CGisItemTrk& trk);
+-  virtual ~CSurfaceTrk();
++  explicit CSurfaceTrk(CGisItemTrk& trk);
++  ~CSurfaceTrk() override;
+ 
+   /// apply a known result to the points or start an analysis
+   void update(CTrackData& data);
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp b/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
+index bbf6865..eb03a57 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
++++ b/src/qmapshack/gis/trk/surface/CSurfaceWidget.cpp
+@@ -21,66 +21,10 @@
+ #include <QtWidgets>
+ #include <algorithm>
+ 
++#include "gis/trk/surface/CSurfaceBar.h"
+ #include "helpers/CSettings.h"
+ #include "units/IUnit.h"
+ 
+-CSurfaceBar::CSurfaceBar(QWidget* parent) : QWidget(parent) {
+-  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+-}
+-
+-void CSurfaceBar::setParts(const QList<part_t>& newParts) {
+-  parts = newParts;
+-  total = 0;
+-  for (const part_t& part : std::as_const(parts)) {
+-    total += part.value;
+-  }
+-  update();
+-}
+-
+-QSize CSurfaceBar::sizeHint() const { return QSize(200, fontMetrics().height()); }
+-
+-QSize CSurfaceBar::minimumSizeHint() const { return QSize(50, fontMetrics().height()); }
+-
+-void CSurfaceBar::paintEvent(QPaintEvent*) {
+-  QPainter p(this);
+-  p.setRenderHint(QPainter::Antialiasing);
+-  const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+-
+-  QPainterPath clip;
+-  clip.addRoundedRect(r, 3, 3);
+-  p.setClipPath(clip);
+-
+-  qreal x = r.left();
+-  for (const part_t& part : std::as_const(parts)) {
+-    if (total <= 0 || part.value <= 0) {
+-      continue;
+-    }
+-    const qreal w = r.width() * part.value / total;
+-    p.fillRect(QRectF(x, r.top(), w, r.height()), part.color);
+-    x += w;
+-  }
+-
+-  p.setClipping(false);
+-  p.setPen(QPen(palette().color(QPalette::Mid), 1));
+-  p.setBrush(Qt::NoBrush);
+-  p.drawRoundedRect(r, 3, 3);
+-}
+-
+-bool CSurfaceBar::event(QEvent* e) {
+-  if (e->type() == QEvent::ToolTip && total > 0) {
+-    QHelpEvent* help = static_cast<QHelpEvent*>(e);
+-    qreal x = 0;
+-    for (const part_t& part : std::as_const(parts)) {
+-      x += width() * part.value / total;
+-      if (help->pos().x() <= x) {
+-        QToolTip::showText(help->globalPos(), part.text, this);
+-        return true;
+-      }
+-    }
+-  }
+-  return QWidget::event(e);
+-}
+-
+ CSurfaceWidget::CSurfaceWidget(QWidget* parent) : QWidget(parent) {
+   QVBoxLayout* layout = new QVBoxLayout(this);
+   layout->setContentsMargins(3, 3, 3, 3);
+@@ -159,13 +103,14 @@ void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
+   switch (state) {
+     case CSurfaceTrk::eStateNoDatabase:
+       labelHint->setText(
+-          tr("<b>Surfaces</b><br/>No surface database covers this track. Build one from an OpenStreetMap "
+-             "extract (.osm.pbf, e.g. from download.geofabrik.de) with <a href='setup'>Tools &rarr; Create Surface "
+-             "Database</a>."));
++          "<b>" + tr("Surfaces") + "</b><br/>" +
++          tr("No surface database covers this track. Build one from an OpenStreetMap extract "
++             "(.osm.pbf, e.g. from download.geofabrik.de) with %1.")
++              .arg("<a href='setup'>" + tr("Tool") + " &rarr; " + tr("Create Surface Database") + "</a>"));
+       labelHint->show();
+       return;
+     case CSurfaceTrk::eStateAnalyzing:
+-      labelHint->setText(tr("<b>Surfaces</b><br/>Analyzing the track..."));
++      labelHint->setText("<b>" + tr("Surfaces") + "</b><br/>" + tr("Analyzing the track..."));
+       labelHint->show();
+       return;
+     case CSurfaceTrk::eStateNoTrack:
+@@ -173,7 +118,7 @@ void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
+       return;
+     default:
+       labelHint->setVisible(!ready);
+-      labelHint->setText(tr("<b>Surfaces</b><br/>The track is too short."));
++      labelHint->setText("<b>" + tr("Surfaces") + "</b><br/>" + tr("The track is too short."));
+       break;
+   }
+   if (!ready) {
+@@ -184,7 +129,7 @@ void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
+ 
+   QList<CSurfaceBar::part_t> parts;
+   QStringList legend;
+-  for (int i = 0; i < CSurface::eClassCount; i++) {
++  for (qint32 i = 0; i < CSurface::eClassCount; i++) {
+     const CSurface::class_e cls = CSurface::class_e(i);
+     const qreal m = res.byClass[i];
+     if (m <= 0) {
+@@ -199,16 +144,16 @@ void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
+   legendClasses->setText("<table cellspacing='0'>" + legend.join("") + "</table>");
+ 
+   // way types sorted by length, like the classes they are few
+-  QVector<int> ways;
+-  for (int i = 0; i < CSurface::eWayCount; i++) {
++  QVector<qint32> ways;
++  for (qint32 i = 0; i < CSurface::eWayCount; i++) {
+     if (res.byWay[i] > 0) {
+       ways << i;
+     }
+   }
+-  std::stable_sort(ways.begin(), ways.end(), [&](int a, int b) { return res.byWay[a] > res.byWay[b]; });
++  std::stable_sort(ways.begin(), ways.end(), [&](qint32 a, qint32 b) { return res.byWay[a] > res.byWay[b]; });
+   parts.clear();
+   legend.clear();
+-  for (int i : std::as_const(ways)) {
++  for (qint32 i : std::as_const(ways)) {
+     const CSurface::waytype_e way = CSurface::waytype_e(i);
+     const QString name = CSurface::wayTypeName(way);
+     const qreal m = res.byWay[i];
+@@ -219,15 +164,15 @@ void CSurfaceWidget::setData(const CSurfaceTrk& surface) {
+   barWays->setParts(parts);
+   legendWays->setText("<table cellspacing='0'>" + legend.join("") + "</table>");
+ 
+-  QVector<int> labels;
+-  for (int i = 0; i < CSurface::eLabelCount; i++) {
++  QVector<qint32> labels;
++  for (qint32 i = 0; i < CSurface::eLabelCount; i++) {
+     if (res.byLabel[i] > 0) {
+       labels << i;
+     }
+   }
+-  std::stable_sort(labels.begin(), labels.end(), [&](int a, int b) { return res.byLabel[a] > res.byLabel[b]; });
++  std::stable_sort(labels.begin(), labels.end(), [&](qint32 a, qint32 b) { return res.byLabel[a] > res.byLabel[b]; });
+   QString details = "<table>";
+-  for (int i : std::as_const(labels)) {
++  for (qint32 i : std::as_const(labels)) {
+     details += QString(
+                    "<tr><td nowrap>%1</td><td align='right' nowrap>&nbsp;&nbsp;%2</td><td align='right' "
+                    "nowrap>&nbsp;&nbsp;%3%</td></tr>")
+diff --git a/src/qmapshack/gis/trk/surface/CSurfaceWidget.h b/src/qmapshack/gis/trk/surface/CSurfaceWidget.h
+index ffb231a..db118d3 100644
+--- a/src/qmapshack/gis/trk/surface/CSurfaceWidget.h
++++ b/src/qmapshack/gis/trk/surface/CSurfaceWidget.h
+@@ -23,35 +23,10 @@
+ 
+ #include "gis/trk/surface/CSurfaceTrk.h"
+ 
++class CSurfaceBar;
+ class QLabel;
+ class QToolButton;
+ 
+-/// a horizontal bar of coloured parts
+-class CSurfaceBar : public QWidget {
+-  Q_OBJECT
+- public:
+-  CSurfaceBar(QWidget* parent);
+-  virtual ~CSurfaceBar() = default;
+-
+-  struct part_t {
+-    QColor color;
+-    qreal value;
+-    QString text;  ///< tooltip
+-  };
+-  void setParts(const QList<part_t>& parts);
+-
+-  QSize sizeHint() const override;
+-  QSize minimumSizeHint() const override;
+-
+- protected:
+-  void paintEvent(QPaintEvent* e) override;
+-  bool event(QEvent* e) override;
+-
+- private:
+-  QList<part_t> parts;
+-  qreal total = 0;
+-};
+-
+ /**
+    @brief Surfaces and way types of a track, for the track's Info tab
+ 
+@@ -61,8 +36,8 @@ class CSurfaceBar : public QWidget {
+ class CSurfaceWidget : public QWidget {
+   Q_OBJECT
+  public:
+-  CSurfaceWidget(QWidget* parent);
+-  virtual ~CSurfaceWidget() = default;
++  explicit CSurfaceWidget(QWidget* parent);
++  ~CSurfaceWidget() override = default;
+ 
+   void setData(const CSurfaceTrk& surface);
+ 
+diff --git a/src/qmapshack/gis/trk/surface/test/CMakeLists.txt b/src/qmapshack/gis/trk/surface/test/CMakeLists.txt
+index 09eef42..e3e9140 100644
+--- a/src/qmapshack/gis/trk/surface/test/CMakeLists.txt
++++ b/src/qmapshack/gis/trk/surface/test/CMakeLists.txt
+@@ -7,6 +7,7 @@ set(SURFACE_CORE_SRCS
+     ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceAnalyzer.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceDb.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceDbBuilder.cpp
++    ${CMAKE_CURRENT_SOURCE_DIR}/../CSurfaceDbSet.cpp
+ )
+ 
+ foreach(TEST_NAME test_CSurface test_CSurfaceDb test_CSurfaceAnalyzer test_SurfaceDurbuy)
+diff --git a/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py b/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
+index a58cc91..d656180 100644
+--- a/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
++++ b/src/qmapshack/gis/trk/surface/test/data/gen_classify_cases.py
+@@ -1,12 +1,13 @@
+ #!/usr/bin/env python3
+ """Generate classify_cases.tsv from the reference classification (osmsurface.py).
+ 
+-Usage: gen_classify_cases.py <dir with osmsurface.py> > classify_cases.tsv
++Usage: gen_classify_cases.py > classify_cases.tsv
+ Columns: highway, surface, tracktype, footway, label (Dutch), class, way type (Dutch).
+ """
++import os
+ import sys
+ 
+-sys.path.insert(0, sys.argv[1])
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ from osmsurface import SURFACE_NL, WEGTYPE, classify  # noqa: E402
+ 
+ highways = sorted(WEGTYPE) + ["", "motorway", "construction", "platform"]
+diff --git a/src/qmapshack/gis/trk/surface/test/data/make_fixture.py b/src/qmapshack/gis/trk/surface/test/data/make_fixture.py
+index 5f56d86..81659df 100644
+--- a/src/qmapshack/gis/trk/surface/test/data/make_fixture.py
++++ b/src/qmapshack/gis/trk/surface/test/data/make_fixture.py
+@@ -1,8 +1,8 @@
+ #!/usr/bin/env python3
+ """Write fixture.osm.pbf, the small OSM extract the surface unit tests use (needs pyosmium).
+ 
+-Usage: make_fixture.py [<dir with osmsurface.py>]
+-With the directory of the reference implementation it also writes fixture_cells.tsv.
++Usage: make_fixture.py
++Also writes fixture_cells.tsv, the cell lookups of the reference implementation (osmsurface.py).
+ 
+ Around 50.0 N / 5.0 E:
+   way 10  highway=track tracktype=grade2   along lat 50.0, lon 5.000 .. 5.010
+@@ -55,22 +55,21 @@ w.add_way(Way(id=16, nodes=[700, 701], tags={"highway": "steps"}))
+ w.close()
+ 
+ # Expected cell lookups from the reference implementation, on a grid over the fixture:
+-# lat, lon, label (Dutch), class, way type (Dutch); "-" if no way passes the cell.
++# lat, lon, label (Dutch), class, way type (Dutch); cells no way passes are left out.
+ import os  # noqa: E402
+ import sys  # noqa: E402
+ 
+-if len(sys.argv) > 1:
+-    sys.path.insert(0, sys.argv[1])
+-    from osmsurface import Surfaces  # noqa: E402
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++from osmsurface import Surfaces  # noqa: E402
+ 
+-    s = Surfaces(out, 50.005, 5.005, 5)
+-    with open("fixture_cells.tsv", "w") as f:
+-        for i in range(-10, 141):
+-            lat = 49.9985 + i * 0.0001
+-            for j in range(-5, 116):
+-                lon = 4.9995 + j * 0.0001
+-                info = s.at(lat, lon)
+-                if info is None:
+-                    continue
+-                f.write(f"{lat:.7f}\t{lon:.7f}\t{info[0]}\t{info[1]}\t{info[2]}\n")
+-    print(os.path.getsize("fixture_cells.tsv"))
++s = Surfaces(out, 50.005, 5.005, 5)
++with open("fixture_cells.tsv", "w") as f:
++    for i in range(-10, 141):
++        lat = 49.9985 + i * 0.0001
++        for j in range(-5, 116):
++            lon = 4.9995 + j * 0.0001
++            info = s.at(lat, lon)
++            if info is None:
++                continue
++            f.write(f"{lat:.7f}\t{lon:.7f}\t{info[0]}\t{info[1]}\t{info[2]}\n")
++print(os.path.getsize("fixture_cells.tsv"))
+diff --git a/src/qmapshack/gis/trk/surface/test/data/osmsurface.py b/src/qmapshack/gis/trk/surface/test/data/osmsurface.py
+new file mode 100644
+index 0000000..68d1b88
+--- /dev/null
++++ b/src/qmapshack/gis/trk/surface/test/data/osmsurface.py
+@@ -0,0 +1,109 @@
++# Reference implementation the C++ surface classification and cell lookup were ported from.
++# Copyright (C) 2026 Gert Pellin <gert@pellin.be>, GPL-3.0-or-later. Used only to generate test data.
++"""Surface and way type along a route, from an OSM .pbf extract (needs pyosmium).
++
++Shared by loop.py (scoring) and surface.py (annotating GPX files for QMapShack).
++Classes follow what a walker feels, like Komoot's "Ondergronden":
++  0 verhard      asphalt, concrete, cobbles/pavers, and roads without a surface tag
++  1 halfverhard  compacted, fine gravel, gravel, tracktype grade2
++  2 onverhard    dirt, ground, grass, sand, rock, grade3-5, paths without a surface tag
++  3 onbekend     tracks with neither surface nor tracktype
++"""
++import math
++from collections import Counter
++
++VERHARD, HALFVERHARD, ONVERHARD, ONBEKEND = 0, 1, 2, 3
++KLASSE_NAAM = {VERHARD: "verhard", HALFVERHARD: "halfverhard", ONVERHARD: "onverhard", ONBEKEND: "onbekend"}
++
++SURFACE_NL = {
++    "asphalt": ("asfalt", VERHARD), "paved": ("verhard", VERHARD), "chipseal": ("asfalt", VERHARD),
++    "concrete": ("beton", VERHARD), "concrete:lanes": ("betonsporen", VERHARD),
++    "concrete:plates": ("betonplaten", VERHARD), "paving_stones": ("klinkers", VERHARD),
++    "sett": ("kasseien", VERHARD), "cobblestone": ("kasseien", VERHARD),
++    "unhewn_cobblestone": ("kasseien", VERHARD), "bricks": ("klinkers", VERHARD),
++    "metal": ("metaal", VERHARD), "wood": ("hout", VERHARD),
++    "compacted": ("verdicht steenslag", HALFVERHARD), "fine_gravel": ("fijn grind", HALFVERHARD),
++    "gravel": ("grind", HALFVERHARD), "pebblestone": ("kiezel", HALFVERHARD),
++    "grass_paver": ("grasdallen", HALFVERHARD),
++    "unpaved": ("onverhard", ONVERHARD), "dirt": ("aarde", ONVERHARD), "earth": ("aarde", ONVERHARD),
++    "ground": ("natuurlijke bodem", ONVERHARD), "grass": ("gras", ONVERHARD), "mud": ("modder", ONVERHARD),
++    "sand": ("zand", ONVERHARD), "woodchips": ("houtsnippers", ONVERHARD), "rock": ("rots", ONVERHARD),
++    "stepping_stones": ("stapstenen", ONVERHARD),
++}
++TRACKTYPE = {"grade1": ("verhard", VERHARD), "grade2": ("halfverhard", HALFVERHARD),
++             "grade3": ("onverhard", ONVERHARD), "grade4": ("onverhard", ONVERHARD),
++             "grade5": ("onverhard", ONVERHARD)}
++WEGTYPE = {
++    "path": "pad", "footway": "pad", "bridleway": "pad", "steps": "trap",
++    "track": "bos-/veldweg", "cycleway": "fietspad",
++    "residential": "straat", "living_street": "straat", "pedestrian": "straat",
++    "unclassified": "weg", "service": "weg", "tertiary": "weg", "tertiary_link": "weg",
++    "secondary": "drukke weg", "secondary_link": "drukke weg", "primary": "drukke weg",
++    "primary_link": "drukke weg", "trunk": "drukke weg",
++}
++
++
++def classify(tags):
++    """(ondergrond in het Nederlands, klasse, wegtype) for a way's tags."""
++    hw = tags.get("highway", "")
++    wegtype = WEGTYPE.get(hw, hw or "?")
++    surface = tags.get("surface", "")
++    if surface in SURFACE_NL:
++        naam, klasse = SURFACE_NL[surface]
++        return naam, klasse, wegtype
++    if hw == "track":
++        if tags.get("tracktype") in TRACKTYPE:
++            naam, klasse = TRACKTYPE[tags["tracktype"]]
++            return naam, klasse, wegtype
++        return "onbekend", ONBEKEND, wegtype
++    if hw in ("path", "bridleway") or (hw == "footway" and tags.get("footway") != "sidewalk"):
++        return "onverhard (aangenomen)", ONVERHARD, wegtype
++    return "verhard (aangenomen)", VERHARD, wegtype  # roads: asphalt in practice
++
++
++def dist_m(a, b):
++    la1, lo1 = map(math.radians, a)
++    la2, lo2 = map(math.radians, b)
++    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
++    return 2 * 6371000 * math.asin(math.sqrt(h))
++
++
++def cell(la, lo):
++    return round(la * 5500), round(lo * 3500)  # ~20 m
++
++
++class Surfaces:
++    """Per ~20 m cell the ways that pass, read once from the extract around a point."""
++
++    def __init__(self, pbf, lat, lon, radius_km):
++        import osmium  # pylint: disable=import-outside-toplevel
++        dlat = radius_km / 110.57
++        dlon = radius_km / (111.32 * math.cos(math.radians(lat)))
++        box = (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
++        cells = self.cells = {}
++
++        class H(osmium.SimpleHandler):
++            def way(self, w):
++                if "highway" not in w.tags:
++                    return
++                nodes = [(n.lat, n.lon) for n in w.nodes if n.location.valid()]
++                if not nodes or not any(box[0] <= la <= box[1] and box[2] <= lo <= box[3] for la, lo in nodes):
++                    return
++                info = classify(dict(w.tags))
++                for a, b in zip(nodes, nodes[1:]):
++                    steps = max(1, int(dist_m(a, b) / 10))
++                    for i in range(steps + 1):
++                        key = cell(a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps)
++                        cells.setdefault(key, Counter())[info] += 1
++
++        H().apply_file(pbf, locations=True)
++
++    def at(self, la, lo):
++        """The way a walker is on here: the one passing this cell most (majority)."""
++        c = self.cells.get(cell(la, lo))
++        return c.most_common(1)[0][0] if c else None
++
++    def paved_share(self, pts):
++        hits = [self.at(la, lo) for la, lo in pts]
++        hits = [h for h in hits if h]
++        return sum(1 for h in hits if h[1] == VERHARD) / len(hits) if hits else 0.0
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
+index 3dbfda5..7ac5ad0 100644
+--- a/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurface.cpp
+@@ -34,45 +34,49 @@ class test_CSurface : public QObject {
+   void namesAndColors();
+ };
+ 
+-static const QHash<QString, CSurface::label_e> labelByDutch = {
+-    {"asfalt", CSurface::eLabelAsphalt},
+-    {"verhard", CSurface::eLabelPaved},
+-    {"beton", CSurface::eLabelConcrete},
+-    {"betonsporen", CSurface::eLabelConcreteLanes},
+-    {"betonplaten", CSurface::eLabelConcretePlates},
+-    {"klinkers", CSurface::eLabelPavingStones},
+-    {"kasseien", CSurface::eLabelCobblestone},
+-    {"metaal", CSurface::eLabelMetal},
+-    {"hout", CSurface::eLabelWood},
+-    {"verdicht steenslag", CSurface::eLabelCompacted},
+-    {"fijn grind", CSurface::eLabelFineGravel},
+-    {"grind", CSurface::eLabelGravel},
+-    {"kiezel", CSurface::eLabelPebblestone},
+-    {"grasdallen", CSurface::eLabelGrassPaver},
+-    {"halfverhard", CSurface::eLabelSemiPaved},
+-    {"onverhard", CSurface::eLabelUnpaved},
+-    {"aarde", CSurface::eLabelDirt},
+-    {"natuurlijke bodem", CSurface::eLabelGround},
+-    {"gras", CSurface::eLabelGrass},
+-    {"modder", CSurface::eLabelMud},
+-    {"zand", CSurface::eLabelSand},
+-    {"houtsnippers", CSurface::eLabelWoodchips},
+-    {"rots", CSurface::eLabelRock},
+-    {"stapstenen", CSurface::eLabelSteppingStones},
+-    {"verhard (aangenomen)", CSurface::eLabelPavedAssumed},
+-    {"onverhard (aangenomen)", CSurface::eLabelUnpavedAssumed},
+-    {"onbekend", CSurface::eLabelUnknown},
+-};
++static QHash<QString, CSurface::label_e> labelByDutch() {
++  return {
++      {"asfalt", CSurface::eLabelAsphalt},
++      {"verhard", CSurface::eLabelPaved},
++      {"beton", CSurface::eLabelConcrete},
++      {"betonsporen", CSurface::eLabelConcreteLanes},
++      {"betonplaten", CSurface::eLabelConcretePlates},
++      {"klinkers", CSurface::eLabelPavingStones},
++      {"kasseien", CSurface::eLabelCobblestone},
++      {"metaal", CSurface::eLabelMetal},
++      {"hout", CSurface::eLabelWood},
++      {"verdicht steenslag", CSurface::eLabelCompacted},
++      {"fijn grind", CSurface::eLabelFineGravel},
++      {"grind", CSurface::eLabelGravel},
++      {"kiezel", CSurface::eLabelPebblestone},
++      {"grasdallen", CSurface::eLabelGrassPaver},
++      {"halfverhard", CSurface::eLabelSemiPaved},
++      {"onverhard", CSurface::eLabelUnpaved},
++      {"aarde", CSurface::eLabelDirt},
++      {"natuurlijke bodem", CSurface::eLabelGround},
++      {"gras", CSurface::eLabelGrass},
++      {"modder", CSurface::eLabelMud},
++      {"zand", CSurface::eLabelSand},
++      {"houtsnippers", CSurface::eLabelWoodchips},
++      {"rots", CSurface::eLabelRock},
++      {"stapstenen", CSurface::eLabelSteppingStones},
++      {"verhard (aangenomen)", CSurface::eLabelPavedAssumed},
++      {"onverhard (aangenomen)", CSurface::eLabelUnpavedAssumed},
++      {"onbekend", CSurface::eLabelUnknown},
++  };
++}
+ 
+-static const QHash<QString, CSurface::waytype_e> wayByDutch = {
+-    {"pad", CSurface::eWayPath},
+-    {"bos-/veldweg", CSurface::eWayTrack},
+-    {"fietspad", CSurface::eWayCycleway},
+-    {"trap", CSurface::eWaySteps},
+-    {"straat", CSurface::eWayStreet},
+-    {"weg", CSurface::eWayRoad},
+-    {"drukke weg", CSurface::eWayBusyRoad},
+-};
++static QHash<QString, CSurface::waytype_e> wayByDutch() {
++  return {
++      {"pad", CSurface::eWayPath},
++      {"bos-/veldweg", CSurface::eWayTrack},
++      {"fietspad", CSurface::eWayCycleway},
++      {"trap", CSurface::eWaySteps},
++      {"straat", CSurface::eWayStreet},
++      {"weg", CSurface::eWayRoad},
++      {"drukke weg", CSurface::eWayBusyRoad},
++  };
++}
+ 
+ void test_CSurface::referenceTable_data() {
+   QTest::addColumn<QString>("highway");
+@@ -80,12 +84,12 @@ void test_CSurface::referenceTable_data() {
+   QTest::addColumn<QString>("tracktype");
+   QTest::addColumn<QString>("footway");
+   QTest::addColumn<QString>("label");
+-  QTest::addColumn<int>("cls");
++  QTest::addColumn<qint32>("cls");
+   QTest::addColumn<QString>("way");
+ 
+   QFile file(QFINDTESTDATA("data/classify_cases.tsv"));
+   QVERIFY(file.open(QIODevice::ReadOnly));
+-  int rows = 0;
++  qint32 rows = 0;
+   while (!file.atEnd()) {
+     const QStringList cols = QString::fromUtf8(file.readLine()).chopped(1).split('\t');
+     QCOMPARE(cols.size(), 7);
+@@ -107,10 +111,10 @@ void test_CSurface::referenceTable() {
+ 
+   const CSurface::info_t info = CSurface::classify({highway, surface, tracktype, footway});
+ 
+-  QVERIFY2(labelByDutch.contains(label), qPrintable(label));
+-  QCOMPARE(info.label, labelByDutch[label]);
+-  QCOMPARE(int(info.cls), cls);
+-  QCOMPARE(info.way, wayByDutch.value(way, CSurface::eWayOther));
++  QVERIFY2(labelByDutch().contains(label), qPrintable(label));
++  QCOMPARE(info.label, labelByDutch()[label]);
++  QCOMPARE(qint32(info.cls), cls);
++  QCOMPARE(info.way, wayByDutch().value(way, CSurface::eWayOther));
+ }
+ 
+ void test_CSurface::assumptions() {
+@@ -138,29 +142,29 @@ void test_CSurface::wayTypes() {
+ void test_CSurface::namesAndColors() {
+   QSet<QString> names;
+   QSet<QRgb> colors;
+-  for (int i = 0; i < CSurface::eClassCount; i++) {
++  for (qint32 i = 0; i < CSurface::eClassCount; i++) {
+     names << CSurface::className(CSurface::class_e(i));
+     colors << CSurface::classColor(CSurface::class_e(i)).rgb();
+   }
+-  QCOMPARE(names.size(), int(CSurface::eClassCount));
+-  QCOMPARE(colors.size(), int(CSurface::eClassCount));
++  QCOMPARE(names.size(), qint32(CSurface::eClassCount));
++  QCOMPARE(colors.size(), qint32(CSurface::eClassCount));
+ 
+   names.clear();
+   colors.clear();
+-  for (int i = 0; i < CSurface::eWayCount; i++) {
++  for (qint32 i = 0; i < CSurface::eWayCount; i++) {
+     names << CSurface::wayTypeName(CSurface::waytype_e(i));
+     colors << CSurface::wayTypeColor(CSurface::waytype_e(i)).rgb();
+   }
+-  QCOMPARE(names.size(), int(CSurface::eWayCount));
+-  QCOMPARE(colors.size(), int(CSurface::eWayCount));
++  QCOMPARE(names.size(), qint32(CSurface::eWayCount));
++  QCOMPARE(colors.size(), qint32(CSurface::eWayCount));
+ 
+   names.clear();
+-  for (int i = 0; i < CSurface::eLabelCount; i++) {
++  for (qint32 i = 0; i < CSurface::eLabelCount; i++) {
+     const QString name = CSurface::labelName(CSurface::label_e(i));
+     QVERIFY(!name.isEmpty());
+     names << name;
+   }
+-  QCOMPARE(names.size(), int(CSurface::eLabelCount));
++  QCOMPARE(names.size(), qint32(CSurface::eLabelCount));
+ }
+ 
+ QTEST_GUILESS_MAIN(test_CSurface)
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
+index cb8526f..2573e8e 100644
+--- a/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurfaceAnalyzer.cpp
+@@ -42,9 +42,9 @@ const CSurface::info_t gravelTrack = {CSurface::eLabelGravel, CSurface::eClassSe
+ const CSurface::info_t groundPath = {CSurface::eLabelGround, CSurface::eClassUnpaved, CSurface::eWayPath};
+ 
+ // 0.001 deg latitude ~ 111.2 m
+-QVector<CSurfaceAnalyzer::point_t> northwards(qreal lat0, int count, qreal step = 0.001) {
++QVector<CSurfaceAnalyzer::point_t> northwards(qreal lat0, qint32 count, qreal step = 0.001) {
+   QVector<CSurfaceAnalyzer::point_t> pts;
+-  for (int i = 0; i < count; i++) {
++  for (qint32 i = 0; i < count; i++) {
+     pts << CSurfaceAnalyzer::point_t{lat0 + i * step, 5.0, false};
+   }
+   return pts;
+@@ -78,7 +78,7 @@ void test_CSurfaceAnalyzer::singlePoint() {
+ void test_CSurfaceAnalyzer::straightLineSampling() {
+   // 1 km north; asphalt south of 50.0034, gravel north of it
+   const auto pts = northwards(50.0, 10, 0.001);
+-  int calls = 0;
++  qint32 calls = 0;
+   const auto result = CSurfaceAnalyzer::analyze(pts,
+                                                 [&](qreal lat, qreal) {
+                                                   calls++;
+@@ -162,7 +162,7 @@ void test_CSurfaceAnalyzer::referenceModeUsesStartPoint() {
+   CSurfaceAnalyzer::options_t opts;
+   opts.sampleDistance = 0;
+   opts.smooth = false;
+-  int calls = 0;
++  qint32 calls = 0;
+   const auto result = CSurfaceAnalyzer::analyze(
+       northwards(50.0, 3),
+       [&](qreal lat, qreal) {
+diff --git a/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp b/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
+index 5c222e2..6e0590e 100644
+--- a/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
++++ b/src/qmapshack/gis/trk/surface/test/test_CSurfaceDb.cpp
+@@ -26,6 +26,7 @@
+ #include "gis/trk/surface/CPbfReader.h"
+ #include "gis/trk/surface/CSurfaceDb.h"
+ #include "gis/trk/surface/CSurfaceDbBuilder.h"
++#include "gis/trk/surface/CSurfaceDbSet.h"
+ 
+ /// PBF reading, database building and lookups on a tiny hand-made extract (data/make_fixture.py).
+ class test_CSurfaceDb : public QObject {
+@@ -55,6 +56,11 @@ class test_CSurfaceDb : public QObject {
+   QString db;
+ };
+ 
++// the classification, or "no data" if there is none
++static CSurface::info_t infoOf(const std::optional<CSurface::info_t>& info) {
++  return info.value_or(CSurface::noData());
++}
++
+ static QString dutchLabel(const CSurface::info_t& info) {
+   static const QHash<int, QString> names = {
+       {CSurface::eLabelAsphalt, "asfalt"},
+@@ -131,7 +137,7 @@ void test_CSurfaceDb::readerNodesAndWays() {
+   QCOMPARE(refs[10].last(), 110);
+ 
+   // only what is asked for
+-  int cntNodes = 0, cntWays = 0;
++  qint32 cntNodes = 0, cntWays = 0;
+   QVERIFY(reader.readData(
+       CPbfReader::eWays, [&](qint64, qint32, qint32) { cntNodes++; },
+       [&](const CPbfReader::way_t&, const QVector<QByteArray>&) { cntWays++; }, nullptr));
+@@ -214,7 +220,7 @@ void test_CSurfaceDb::builderArea() {
+   QVERIFY(surface.isValid());
+   QCOMPARE(surface.chunkCount(), 1);
+   QVERIFY(surface.lookupCell(50.0, 5.005).has_value());
+-  QCOMPARE(surface.lookupCell(50.0, 5.005)->label, CSurface::eLabelAsphalt);
++  QCOMPARE(infoOf(surface.lookupCell(50.0, 5.005)).label, CSurface::eLabelAsphalt);
+   QVERIFY(!surface.lookupCell(50.002, 5.001).has_value());
+ }
+ 
+@@ -264,9 +270,9 @@ void test_CSurfaceDb::cellLookupMatchesReference_data() {
+   QVERIFY(reference.size() > 300);
+ 
+   // the same grid make_fixture.py queried, empty cells included
+-  for (int i = -10; i < 141; i++) {
++  for (qint32 i = -10; i < 141; i++) {
+     const qreal lat = 49.9985 + i * 0.0001;
+-    for (int j = -5; j < 116; j++) {
++    for (qint32 j = -5; j < 116; j++) {
+       const qreal lon = 4.9995 + j * 0.0001;
+       const QString key = QString("%1 %2").arg(lat, 0, 'f', 7).arg(lon, 0, 'f', 7);
+       QTest::newRow(key.toUtf8()) << lat << lon << reference.value(key, "-");
+@@ -285,7 +291,8 @@ void test_CSurfaceDb::cellLookupMatchesReference() {
+   }
+   const std::optional<CSurface::info_t> info = surface->lookupCell(lat, lon);
+   const QString actual =
+-      info ? QString("%1|%2|%3").arg(dutchLabel(*info)).arg(int(info->cls)).arg(dutchWay(*info)) : QString("-");
++      info ? QString("%1|%2|%3").arg(dutchLabel(infoOf(info))).arg(qint32(infoOf(info).cls)).arg(dutchWay(infoOf(info)))
++           : QString("-");
+   QCOMPARE(actual, expected);
+ }
+ 
+@@ -294,15 +301,15 @@ void test_CSurfaceDb::chunkingDoesNotMatter() {
+   CSurfaceDb small(file);
+   CSurfaceDb large(db);
+   QVERIFY(small.chunkCount() > large.chunkCount());
+-  for (int i = -10; i < 141; i += 3) {
+-    for (int j = -5; j < 116; j += 3) {
++  for (qint32 i = -10; i < 141; i += 3) {
++    for (qint32 j = -5; j < 116; j += 3) {
+       const qreal lat = 49.9985 + i * 0.0001;
+       const qreal lon = 4.9995 + j * 0.0001;
+       const auto a = small.lookupCell(lat, lon);
+       const auto b = large.lookupCell(lat, lon);
+       QCOMPARE(a.has_value(), b.has_value());
+       if (a) {
+-        QVERIFY(*a == *b);
++        QVERIFY(infoOf(a) == infoOf(b));
+       }
+     }
+   }
+@@ -315,14 +322,14 @@ void test_CSurfaceDb::nearestFallback() {
+   QVERIFY(!surface.lookupCell(lat, 5.0031).has_value());
+   const auto near = surface.lookupNearest(lat, 5.0031, 25);
+   QVERIFY(near.has_value());
+-  QCOMPARE(near->way, CSurface::eWayPath);
++  QCOMPARE(infoOf(near).way, CSurface::eWayPath);
+   QVERIFY(!surface.lookupNearest(lat, 5.0031, 20).has_value());
+   QVERIFY(!surface.lookupNearest(lat, 5.0031, 0).has_value());
+ 
+   // beyond the end of a way the distance is to its end node
+   const auto end = surface.lookupNearest(50.0, 5.0101, 25);
+   QVERIFY(end.has_value());
+-  QCOMPARE(end->way, CSurface::eWayTrack);
++  QCOMPARE(infoOf(end).way, CSurface::eWayTrack);
+   QVERIFY(!surface.lookupNearest(50.0, 5.0105, 25).has_value());
+ }
+ 
+@@ -333,9 +340,9 @@ void test_CSurfaceDb::dbSet() {
+   QVERIFY(set.covers(QRectF(QPointF(4.0, 49.0), QPointF(6.0, 51.0))));
+   QVERIFY(!set.covers(QRectF(QPointF(6.0, 51.0), QPointF(6.1, 51.1))));
+ 
+-  QCOMPARE(set.lookup(50.0, 5.0021, 25)->way, CSurface::eWayTrack);
++  QCOMPARE(infoOf(set.lookup(50.0, 5.0021, 25)).way, CSurface::eWayTrack);
+   // cell miss -> nearest within 25 m
+-  QCOMPARE(set.lookup(50.002 + 22 / 111195.0, 5.0031, 25)->way, CSurface::eWayPath);
++  QCOMPARE(infoOf(set.lookup(50.002 + 22 / 111195.0, 5.0031, 25)).way, CSurface::eWayPath);
+   QVERIFY(!set.lookup(50.002 + 22 / 111195.0, 5.0031, 0).has_value());
+   // outside every database
+   QVERIFY(!set.lookup(52.0, 6.0, 25).has_value());
+@@ -388,7 +395,8 @@ void test_CSurfaceDb::invalidFiles() {
+ void test_CSurfaceDb::distanceAndCells() {
+   // 0.001 deg latitude is ~111 m
+   QVERIFY(qAbs(CSurfaceDb::distance(50.0, 5.0, 50.001, 5.0) - 111.19) < 0.01);
+-  QCOMPARE(CSurfaceDb::distance(50.0, 5.0, 50.0, 5.0), 0.0);
++  // not exactly 0 if the compiler contracts to FMA (-march)
++  QVERIFY(CSurfaceDb::distance(50.0, 5.0, 50.0, 5.0) < 1e-6);
+ 
+   qint64 row, col;
+   CSurfaceDb::cell(50.0, 5.0, row, col);
+diff --git a/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp b/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
+index 77a0a31..b96216a 100644
+--- a/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
++++ b/src/qmapshack/gis/trk/surface/test/test_SurfaceDurbuy.cpp
+@@ -16,7 +16,6 @@
+ 
+ **********************************************************************************************/
+ 
+-#include <QDir>
+ #include <QFile>
+ #include <QTemporaryDir>
+ #include <QXmlStreamReader>
+@@ -25,14 +24,15 @@
+ #include "gis/trk/surface/CSurfaceAnalyzer.h"
+ #include "gis/trk/surface/CSurfaceDb.h"
+ #include "gis/trk/surface/CSurfaceDbBuilder.h"
++#include "gis/trk/surface/CSurfaceDbSet.h"
+ 
+ /**
+    Real-world check against the reference implementation (osmsurface.py / surface.py) on a
+    27.6 km hike near Durbuy, Belgium, with the Geofabrik extract of Belgium.
+ 
+    Needs data outside the repository, skipped if it is missing:
+-     QMS_SURFACE_PBF  belgium-latest.osm.pbf  (default ~/QMapShackData/Routino/src/belgium-latest.osm.pbf)
+-     QMS_SURFACE_GPX  the track               (default ~/QMapShackData/GPX/Durbuy/Durbuy-Tohogne_2.gpx)
++     QMS_SURFACE_GPX  the track Durbuy-Tohogne_2.gpx
++     QMS_SURFACE_PBF  belgium-latest.osm.pbf of the same day
+      QMS_SURFACE_DB   optional: an existing surface database to use instead of building one
+ 
+    Reference result for the extract of 2026-10-08 (verhard / halfverhard / onverhard / onbekend):
+@@ -59,22 +59,18 @@ class test_SurfaceDurbuy : public QObject {
+   QVector<CSurfaceAnalyzer::point_t> points;
+ };
+ 
+-static constexpr qreal reference[CSurface::eClassCount] = {29.117401, 20.463965, 44.626584, 5.792051};
+-static constexpr qreal toleranceReferenceMode = 0.05;  // percentage points
+-static constexpr qreal toleranceDefaultMode = 2.5;
+-
+-static QString setting(const char* env, const QString& def) {
+-  const QString value = qEnvironmentVariable(env);
+-  return value.isEmpty() ? def : value;
+-}
++static constexpr qreal kReference[CSurface::eClassCount] = {29.117401, 20.463965, 44.626584, 5.792051};
++static constexpr qreal kToleranceReferenceMode = 0.05;  // percentage points
++static constexpr qreal kToleranceDefaultMode = 2.5;
+ 
+ void test_SurfaceDurbuy::initTestCase() {
+-  const QString gpx =
+-      setting("QMS_SURFACE_GPX", QDir::home().filePath("QMapShackData/GPX/Durbuy/Durbuy-Tohogne_2.gpx"));
+-  const QString pbf =
+-      setting("QMS_SURFACE_PBF", QDir::home().filePath("QMapShackData/Routino/src/belgium-latest.osm.pbf"));
++  const QString gpx = qEnvironmentVariable("QMS_SURFACE_GPX");
++  const QString pbf = qEnvironmentVariable("QMS_SURFACE_PBF");
+   db = qEnvironmentVariable("QMS_SURFACE_DB");
+ 
++  if (gpx.isEmpty()) {
++    QSKIP("QMS_SURFACE_GPX not set");
++  }
+   QFile file(gpx);
+   if (!file.open(QIODevice::ReadOnly)) {
+     QSKIP(qPrintable("Track not found: " + gpx));
+@@ -121,14 +117,14 @@ void test_SurfaceDurbuy::initTestCase() {
+ void test_SurfaceDurbuy::compare(const CSurfaceAnalyzer::result_t& result, qreal tolerance) {
+   QVERIFY(result.valid);
+   QVERIFY2(qAbs(result.total - 28031.2) < 1, qPrintable(QString::number(result.total)));
+-  for (int i = 0; i < CSurface::eClassCount; i++) {
++  for (qint32 i = 0; i < CSurface::eClassCount; i++) {
+     qInfo("%-12s %6.2f %% (reference %6.2f %%)", qPrintable(CSurface::className(CSurface::class_e(i))),
+-          result.percent(CSurface::class_e(i)), reference[i]);
++          result.percent(CSurface::class_e(i)), kReference[i]);
+   }
+-  for (int i = 0; i < CSurface::eClassCount; i++) {
++  for (qint32 i = 0; i < CSurface::eClassCount; i++) {
+     const qreal percent = result.percent(CSurface::class_e(i));
+-    QVERIFY2(qAbs(percent - reference[i]) <= tolerance,
+-             qPrintable(QString("class %1: %2 % vs %3 %").arg(i).arg(percent).arg(reference[i])));
++    QVERIFY2(qAbs(percent - kReference[i]) <= tolerance,
++             qPrintable(QString("class %1: %2 % vs %3 %").arg(i).arg(percent).arg(kReference[i])));
+   }
+ }
+ 
+@@ -141,7 +137,7 @@ void test_SurfaceDurbuy::referenceMode() {
+   opts.smooth = false;
+   const auto result =
+       CSurfaceAnalyzer::analyze(points, [&](qreal lat, qreal lon) { return set.lookup(lat, lon, 0); }, opts);
+-  compare(result, toleranceReferenceMode);
++  compare(result, kToleranceReferenceMode);
+ }
+ 
+ void test_SurfaceDurbuy::defaultMode() {
+@@ -150,7 +146,7 @@ void test_SurfaceDurbuy::defaultMode() {
+   const CSurfaceAnalyzer::options_t opts;
+   const auto result = CSurfaceAnalyzer::analyze(
+       points, [&](qreal lat, qreal lon) { return set.lookup(lat, lon, opts.fallbackDistance); }, opts);
+-  compare(result, toleranceDefaultMode);
++  compare(result, kToleranceDefaultMode);
+   QVERIFY(result.samplesWithData == result.samples);
+ }
+ 
+diff --git a/src/qmapshack/locale/qmapshack_nl.ts b/src/qmapshack/locale/qmapshack_nl.ts
+index 205e542..557a714 100644
+--- a/src/qmapshack/locale/qmapshack_nl.ts
++++ b/src/qmapshack/locale/qmapshack_nl.ts
+@@ -19553,16 +19553,24 @@ of
+         <translation>Ondergrond in detail</translation>
+     </message>
+     <message>
+-        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;No surface database covers this track. Build one from an OpenStreetMap extract (.osm.pbf, e.g. from download.geofabrik.de) with &lt;a href=&apos;setup&apos;&gt;Tools &amp;rarr; Create Surface Database&lt;/a&gt;.</source>
+-        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;Geen ondergrond-database voor dit gebied. Maak er een van een OpenStreetMap-uittreksel (.osm.pbf, bv. van download.geofabrik.de) via &lt;a href=&apos;setup&apos;&gt;Gereedschap &amp;rarr; Ondergrond-database maken&lt;/a&gt;.</translation>
++        <source>No surface database covers this track. Build one from an OpenStreetMap extract (.osm.pbf, e.g. from download.geofabrik.de) with %1.</source>
++        <translation>Geen ondergrond-database voor dit gebied. Maak er een van een OpenStreetMap-uittreksel (.osm.pbf, bv. van download.geofabrik.de) via %1.</translation>
+     </message>
+     <message>
+-        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;Analyzing the track...</source>
+-        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;Track wordt geanalyseerd...</translation>
++        <source>Tool</source>
++        <translation>Gereedschap</translation>
++    </message>
++    <message>
++        <source>Create Surface Database</source>
++        <translation>Ondergrond-database maken</translation>
+     </message>
+     <message>
+-        <source>&lt;b&gt;Surfaces&lt;/b&gt;&lt;br/&gt;The track is too short.</source>
+-        <translation>&lt;b&gt;Ondergronden&lt;/b&gt;&lt;br/&gt;De track is te kort.</translation>
++        <source>Analyzing the track...</source>
++        <translation>Track wordt geanalyseerd...</translation>
++    </message>
++    <message>
++        <source>The track is too short.</source>
++        <translation>De track is te kort.</translation>
+     </message>
+ </context>
+ <context>
+@@ -19603,8 +19611,12 @@ of
+         <translation>Ondergrond-database maken</translation>
+     </message>
+     <message>
+-        <source>&lt;b&gt;Surface Database&lt;/b&gt;&lt;br/&gt;A surface database holds the roads and paths of an OpenStreetMap extract with their surface and type. With it, QMapShack shows the surfaces and way types of every track in the track&apos;s Info tab and can color tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from &lt;a href=&apos;https://download.geofabrik.de&apos;&gt;download.geofabrik.de&lt;/a&gt;, the same file as for a Routino database. For a small country building takes about a minute and some 300 MB of memory.</source>
+-        <translation>&lt;b&gt;Ondergrond-database&lt;/b&gt;&lt;br/&gt;Een ondergrond-database bevat de wegen en paden van een OpenStreetMap-uittreksel met hun ondergrond en wegtype. Daarmee toont QMapShack de ondergronden en wegtypes van elke track in het tabblad Info van de track en kan het tracks kleuren volgens ondergrond (tabblad Stijl). Download een uittreksel (.osm.pbf), bv. van &lt;a href=&apos;https://download.geofabrik.de&apos;&gt;download.geofabrik.de&lt;/a&gt;, hetzelfde bestand als voor een Routino-database. Voor een klein land duurt het maken ongeveer een minuut en vraagt het zo&apos;n 300 MB geheugen.</translation>
++        <source>Surface Database</source>
++        <translation>Ondergrond-database</translation>
++    </message>
++    <message>
++        <source>A surface database holds the roads and paths of an OpenStreetMap extract with their surface and type. With it, QMapShack shows the surfaces and way types of every track in the track&apos;s Info tab and can color tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from %1, the same file as for a Routino database. For a small country building takes about a minute and some 300 MB of memory.</source>
++        <translation>Een ondergrond-database bevat de wegen en paden van een OpenStreetMap-uittreksel met hun ondergrond en wegtype. Daarmee toont QMapShack de ondergronden en wegtypes van elke track in het tabblad Info van de track en kan het tracks kleuren volgens ondergrond (tabblad Stijl). Download een uittreksel (.osm.pbf), bv. van %1, hetzelfde bestand als voor een Routino-database. Voor een klein land duurt het maken ongeveer een minuut en vraagt het zo&apos;n 300 MB geheugen.</translation>
+     </message>
+     <message>
+         <source>OSM extract</source>
+diff --git a/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp b/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
+index 89cff14..205d358 100644
+--- a/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
++++ b/src/qmapshack/tool/CSurfaceDatabaseBuilder.cpp
+@@ -35,11 +35,12 @@ CSurfaceDatabaseBuilder::CSurfaceDatabaseBuilder(QWidget* parent) : QWidget(pare
+   help->setWordWrap(true);
+   help->setOpenExternalLinks(true);
+   help->setText(
+-      tr("<b>Surface Database</b><br/>A surface database holds the roads and paths of an OpenStreetMap extract with "
+-         "their surface and type. With it, QMapShack shows the surfaces and way types of every track in the track's "
+-         "Info tab and can color tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from "
+-         "<a href='https://download.geofabrik.de'>download.geofabrik.de</a>, the same file as for a Routino "
+-         "database. For a small country building takes about a minute and some 300 MB of memory."));
++      "<b>" + tr("Surface Database") + "</b><br/>" +
++      tr("A surface database holds the roads and paths of an OpenStreetMap extract with their surface and type. "
++         "With it, QMapShack shows the surfaces and way types of every track in the track's Info tab and can color "
++         "tracks by surface (Style tab). Download an extract (.osm.pbf) e.g. from %1, the same file as for a Routino "
++         "database. For a small country building takes about a minute and some 300 MB of memory.")
++          .arg("<a href='https://download.geofabrik.de'>download.geofabrik.de</a>"));
+   layout->addWidget(help);
+ 
+   QGridLayout* grid = new QGridLayout();
+@@ -125,7 +126,7 @@ QString CSurfaceDatabaseBuilder::targetFile() const {
+   if (name.isEmpty()) {
+     return QString();
+   }
+-  return QDir(CSurfaceDbManager::self().getPath()).absoluteFilePath(name + "." + CSurfaceDbBuilder::suffix);
++  return QDir(CSurfaceDbManager::self().getPath()).absoluteFilePath(name + "." + CSurfaceDbBuilder::suffix());
+ }
+ 
+ void CSurfaceDatabaseBuilder::updateButtons() {
+@@ -202,10 +203,10 @@ void CSurfaceDatabaseBuilder::slotStart() {
+ 
+   watcher.setFuture(QtConcurrent::run([opts, this]() {
+     CSurfaceDbBuilder builder(opts);
+-    int last = -1;
++    qint32 last = -1;
+     const bool ok = builder.build(
+         [&](qreal fraction, const QString& step) {
+-          const int value = qRound(fraction * 1000);
++          const qint32 value = qRound(fraction * 1000);
+           if (value == last) {
+             return;
+           }
+@@ -274,7 +275,7 @@ void CSurfaceDatabaseBuilder::slotDatabasesChanged() {
+                      tr("%1\nfrom %2, built %3")
+                          .arg(db.file, db.source, QLocale().toString(db.created.toLocalTime(), QLocale::ShortFormat)));
+   }
+-  for (int i = 0; i < treeDatabases->columnCount(); i++) {
++  for (qint32 i = 0; i < treeDatabases->columnCount(); i++) {
+     treeDatabases->resizeColumnToContents(i);
+   }
+   treeDatabases->blockSignals(false);
+diff --git a/src/qmapshack/tool/CSurfaceDatabaseBuilder.h b/src/qmapshack/tool/CSurfaceDatabaseBuilder.h
+index c1c6299..8e8a3a1 100644
+--- a/src/qmapshack/tool/CSurfaceDatabaseBuilder.h
++++ b/src/qmapshack/tool/CSurfaceDatabaseBuilder.h
+@@ -39,8 +39,8 @@ class QTreeWidgetItem;
+ class CSurfaceDatabaseBuilder : public QWidget {
+   Q_OBJECT
+  public:
+-  CSurfaceDatabaseBuilder(QWidget* parent);
+-  virtual ~CSurfaceDatabaseBuilder();
++  explicit CSurfaceDatabaseBuilder(QWidget* parent);
++  ~CSurfaceDatabaseBuilder() override;
+ 
+  private slots:
+   void slotSelectSource();
+diff --git a/src/qms_surfacedb/main.cpp b/src/qms_surfacedb/main.cpp
+index a634f05..65fa8d5 100644
+--- a/src/qms_surfacedb/main.cpp
++++ b/src/qms_surfacedb/main.cpp
+@@ -30,13 +30,13 @@ int main(int argc, char** argv) {
+   QCoreApplication::setApplicationVersion(VER_STRING);
+ 
+   QCommandLineParser parser;
+-  parser.setApplicationDescription("Build a QMapShack surface database (<name>." + CSurfaceDbBuilder::suffix +
++  parser.setApplicationDescription("Build a QMapShack surface database (<name>." + CSurfaceDbBuilder::suffix() +
+                                    ") from an OpenStreetMap extract. Put it in the directory set up in QMapShack's "
+                                    "\"Create Surface Database\" tool.");
+   parser.addHelpOption();
+   parser.addVersionOption();
+   parser.addPositionalArgument("source", "OSM extract (.osm.pbf)");
+-  parser.addPositionalArgument("target", "database file to write, e.g. Belgium." + CSurfaceDbBuilder::suffix);
++  parser.addPositionalArgument("target", "database file to write, e.g. Belgium." + CSurfaceDbBuilder::suffix());
+   QCommandLineOption optName({"n", "name"}, "name of the region (default: from the target file)", "name");
+   QCommandLineOption optQuiet({"q", "quiet"}, "no progress output");
+   parser.addOption(optName);
+@@ -55,10 +55,10 @@ int main(int argc, char** argv) {
+ 
+   QTextStream err(stderr);
+   const bool quiet = parser.isSet(optQuiet);
+-  int last = -1;
++  qint32 last = -1;
+   CSurfaceDbBuilder builder(opts);
+   const bool ok = builder.build([&](qreal fraction, const QString& step) {
+-    const int percent = qRound(fraction * 100);
++    const qint32 percent = qRound(fraction * 100);
+     if (!quiet && percent != last) {
+       last = percent;
+       err << "\r" << step << " " << percent << "%   " << Qt::flush;
