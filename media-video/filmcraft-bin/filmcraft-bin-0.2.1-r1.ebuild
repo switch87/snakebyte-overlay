@@ -13,12 +13,17 @@ S="${WORKDIR}/filmcraft-${PV}-linux-x86_64"
 LICENSE="|| ( MIT Apache-2.0 )"
 SLOT="0"
 KEYWORDS="~amd64"
+IUSE="+pipewire"
 RESTRICT="bindist mirror strip"
 
 # The binary links only against glibc, gcc and ALSA; the rest is dlopen()ed at runtime
 # (wgpu/winit): Vulkan or EGL, Wayland or X11, xkbcommon, D-Bus.
+# Sound goes through ALSA's "default" device. On a PipeWire system that device only exists
+# when PipeWire's ALSA plugin config is installed into /etc/alsa/conf.d (USE=pipewire-alsa);
+# without it playback fails with "Unknown PCM default".
 RDEPEND="
 	media-libs/alsa-lib
+	pipewire? ( media-video/pipewire[pipewire-alsa] )
 	media-libs/libglvnd
 	media-libs/vulkan-loader
 	sys-apps/dbus

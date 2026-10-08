@@ -5,6 +5,9 @@
 		<email>gert@pellin.be</email>
 		<name>Gert Pellin</name>
 	</maintainer>
+	<use>
+		<flag name="pipewire">Route ALSA playback to PipeWire (requires <pkg>media-video/pipewire</pkg> with USE=pipewire-alsa)</flag>
+	</use>
 	<upstream>
 		<remote-id type="github">storytold/filmcraft</remote-id>
 	</upstream>
