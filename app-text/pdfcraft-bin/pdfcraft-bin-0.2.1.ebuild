@@ -5,10 +5,13 @@ EAPI=8
 
 inherit xdg
 
-DESCRIPTION="Open-source PDF reader and editor (PrintCraft, formerly PdfCraft) in Rust"
+# 0.2.1 was released under the interim name PrintCraft; the project is PdfCraft again.
+MY_PN=printcraft
+
+DESCRIPTION="Open-source PDF reader and editor, written in Rust"
 HOMEPAGE="https://getartcraft.com/apps/pdfcraft https://github.com/storytold/pdfcraft"
-SRC_URI="https://github.com/storytold/pdfcraft/releases/download/v${PV}/printcraft-${PV}-linux-x86_64.tar.gz"
-S="${WORKDIR}/printcraft-${PV}-linux-x86_64"
+SRC_URI="https://github.com/storytold/pdfcraft/releases/download/v${PV}/${MY_PN}-${PV}-linux-x86_64.tar.gz"
+S="${WORKDIR}/${MY_PN}-${PV}-linux-x86_64"
 
 LICENSE="|| ( MIT Apache-2.0 )"
 SLOT="0"
@@ -29,13 +32,13 @@ RDEPEND="
 	dev-libs/wayland
 "
 
-QA_PREBUILT="usr/bin/printcraft usr/bin/printcraft-cli"
+QA_PREBUILT="usr/bin/${MY_PN} usr/bin/${MY_PN}-cli"
 
 src_install() {
-	dobin bin/printcraft bin/printcraft-cli
+	dobin bin/${MY_PN} bin/${MY_PN}-cli
 
 	insinto /usr/share
 	doins -r share/applications share/icons share/metainfo share/mime
 
-	dodoc share/doc/printcraft/README.md
+	dodoc share/doc/${MY_PN}/README.md
 }

@@ -357,7 +357,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-office/deckcraft-bin` | 0.1.0 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `app-office/gridcraft-bin` | 0.1.0 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `app-office/wordcraft-bin` | 0.1.0 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
-| `app-text/printcraft-bin` | 0.2.1 | PrintCraft (formerly PdfCraft) PDF reader and editor (Rust) | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
+| `app-text/pdfcraft-bin` | 0.2.1 | PdfCraft PDF reader and editor (Rust; 0.2.1 was released as PrintCraft) | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
 | `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |

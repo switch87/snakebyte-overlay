@@ -9,7 +9,7 @@
 		<remote-id type="github">storytold/pdfcraft</remote-id>
 	</upstream>
 	<longdescription lang="en">
-		PrintCraft (repository storytold/pdfcraft) is a clean-room reimplementation of an Acrobat-style PDF application in pure Rust: read, organize, combine, split and secure PDFs. Installed from the upstream Linux tarball; the binary only
+		PdfCraft (released as PrintCraft 0.2.1) is a clean-room reimplementation of an Acrobat-style PDF application in pure Rust: read, organize, combine, split and secure PDFs. Installed from the upstream Linux tarball; the binary only
 		links against glibc and loads the graphics libraries at runtime. Early alpha.
 	</longdescription>
 </pkgmetadata>
