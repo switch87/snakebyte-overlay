@@ -227,8 +227,10 @@ patches add Qt Concurrent and, with `USE=test`, QtTest unit tests.
 A further patch reads Mapsforge POI files of version 3 and 4 (OpenAndroMaps'
 current `.poi` files); stock QMapShack only accepts version 2. Version 3 has no
 R-tree, so it is read per visible row segment for all checked categories at once
-(±0.4 s around Durbuy against 0.2–0.3 s for v2/v4). Both are offered upstream
-(Maproom/qmapshack); the revision is dropped once a release has them.
+(±0.4 s around Durbuy against 0.2–0.3 s for v2/v4). Both are offered upstream:
+[Maproom/qmapshack#1282](https://github.com/Maproom/qmapshack/pull/1282) (surfaces, QMS-1280) and
+[#1283](https://github.com/Maproom/qmapshack/pull/1283) (POI v3/v4, QMS-1281); the revision is
+dropped once a release has them.
 
 ### KDE Connect with location sharing and remote connect — `kde-misc/kdeconnect`
 
