@@ -47,6 +47,7 @@ PATCHES=(
 	"${FILESDIR}"/${P}-surface-01.patch
 	"${FILESDIR}"/${P}-surface-02.patch
 	"${FILESDIR}"/${P}-surface-03.patch
+	"${FILESDIR}"/${P}-poi-v3-v4.patch
 )
 
 src_prepare() {
