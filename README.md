@@ -165,6 +165,14 @@ directory. Drop this copy again once `::gentoo` catches up.
 bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump
 ```
 
+### OpenCode — `dev-util/opencode-bin`
+
+OpenCode, the open source coding agent for the terminal (CLI, TUI and web
+interface): <https://opencode.ai>. Copy of the `::guru` ebuild, bumped to the
+current release so this overlay stays self-contained; the prebuilt binary
+comes from upstream's npm packages (`@opencode/cli-linux-*`, MIT).
+Installed and tested on amd64 (2.0.26, 2026-10-10).
+
 ### Wispr Flow — `app-accessibility/wispr-flow-bin`
 
 Voice dictation for office work. Wispr Flow has no official Linux build; this
@@ -420,6 +428,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-text/pdfcraft` | 0.2.1 | PdfCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks pdfcraft-bin; USE=mcp |
 | `app-text/pdfcraft-bin` | 0.2.1 | PdfCraft PDF reader and editor (Rust; 0.2.1 was released as PrintCraft) | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
 | `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
+| `dev-util/opencode-bin` | 2.0.26 | OpenCode coding agent (CLI/TUI/web), prebuilt Linux binary | MIT | copy from `::guru`; bumped to the current release |
 | `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
 | `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |

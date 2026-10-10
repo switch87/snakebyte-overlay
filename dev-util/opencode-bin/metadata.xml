@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+  <maintainer type="person">
+    <email>gert@pellin.be</email>
+    <name>Gert</name>
+  </maintainer>
+  <longdescription>OpenCode is an open source coding agent for the terminal, with a CLI, TUI and web interface.</longdescription>
+  <upstream>
+    <bugs-to>https://github.com/anomalyco/opencode/issues</bugs-to>
+    <remote-id type="github">anomalyco/opencode</remote-id>
+  </upstream>
+</pkgmetadata>
