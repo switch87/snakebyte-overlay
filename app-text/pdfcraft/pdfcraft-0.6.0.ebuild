@@ -42,21 +42,21 @@ RDEPEND="
 "
 BDEPEND="virtual/pkgconfig"
 
-QA_FLAGS_IGNORED="usr/bin/printcraft usr/bin/printcraft-cli"
+QA_FLAGS_IGNORED="usr/bin/pdfcraft usr/bin/pdfcraft-cli"
 
 src_configure() {
-	# The MCP server for AI agents (`printcraft-cli mcp`) is the CLI's only default feature.
+	# The MCP server for AI agents (`pdfcraft-cli mcp`) is the CLI's only default feature.
 	cargo_src_configure $(usev !mcp --no-default-features)
 }
 
 src_compile() {
-	cargo_src_compile -p printcraft -p printcraft-cli
+	cargo_src_compile -p pdfcraft -p pdfcraft-cli
 }
 
 src_install() {
-	dobin "$(cargo_target_dir)"/{printcraft,printcraft-cli}
+	dobin "$(cargo_target_dir)"/{pdfcraft,pdfcraft-cli}
 
-	local id=ai.storyteller.printcraft
+	local id=ai.storyteller.pdfcraft
 	domenu packaging/linux/${id}.desktop
 	insinto /usr/share/mime/packages
 	newins packaging/linux/${id}.mime.xml ${id}.xml

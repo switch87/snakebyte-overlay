@@ -284,11 +284,12 @@ packaged from [AdobeWine](https://github.com/le-birnes/AdobeWine):
 
 - **`wine-adobe`** (11.18) — Wine with the AdobeWine patch set, installed next
   to other Wine versions in `/usr/lib/wine-adobe-11.18`.
-- **`adobewine`** (0.1.0) — the `adobewine` command. It creates a per-user
+- **`adobewine`** (0.2.2) — the `adobewine` command. It creates a per-user
   prefix in `~/.local/share/adobewine/prefix` (DXVK, vkd3d-proton behind
   AdobeWine's D3D12 shim, fonts, registry settings), starts the apps and adds
-  them to the menu. DXVK, vkd3d-proton, wine-gecko and wine-mono come from
-  Portage; nothing is downloaded at run time except what winetricks fetches.
+  them to the menu. DXVK, vkd3d-proton, nvidia-libs, wine-gecko and wine-mono
+  come from Portage; nothing is downloaded at run time except what winetricks
+  fetches.
 
 ```sh
 adobewine setup [--windows-fonts <Fonts folder of your own Windows>]
@@ -297,8 +298,8 @@ adobewine launchers                            # menu entries
 adobewine photoshop
 ```
 
-On top of AdobeWine 0.1.0 these fixes are applied; each is also offered
-upstream (pull requests 3–5) and dropped here once merged:
+AdobeWine 0.2.x carries the fixes this overlay used to apply on top of 0.1.0
+itself — they are upstream as pull requests 3–7:
 
 - **Segoe UI from Selawik** (`media-fonts/selawik`) when no Windows fonts are
   given. Without a real "Segoe UI" family Photoshop's menu bar stays white and
@@ -310,11 +311,20 @@ upstream (pull requests 3–5) and dropped here once merged:
   12_1 on Intel).
 - `adobewine photoshop` and the menu entries use the **newest installed
   release** (e.g. Photoshop 2025), and menu entries get the app's icon.
+- On NVIDIA cards setup installs the CUDA/NVENC/NVAPI bridges from
+  **nvidia-libs** (`SveSop/nvidia-libs`), shipped in `/opt/adobewine/deps`
+  next to DXVK and vkd3d-proton.
+
+Still local to this overlay: the runtime is Portage's
+`app-emulation/wine-adobe` instead of a self-built one, DXVK/vkd3d-proton/
+nvidia-libs are installed at emerge time instead of fetched at first setup,
+and prefixes made by `adobewine-0.1.0-r1` lose the Selawik GDI FontSubstitutes
+that version wrote (with a real Segoe UI they steer GDI away from it).
 
 After upgrading, run `adobewine setup` once more so an existing prefix gets the
-fixes. Photoshop needs a lot of memory while it starts: on a machine with 8 GB
-RAM add disk swap (a swapfile in its own btrfs subvolume), or it is killed by
-the OOM killer. A Creative Cloud subscription is required; Adobe does not
+new patches. Photoshop needs a lot of memory while it starts: on a machine with
+8 GB RAM add disk swap (a swapfile in its own btrfs subvolume), or it is killed
+by the OOM killer. A Creative Cloud subscription is required; Adobe does not
 support running its apps under Wine.
 
 ### Touch screen edge rejection — `kde-plasma/kwin` and `kde-plasma/plasma-desktop`
@@ -414,22 +424,22 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
-| `app-emulation/adobewine` | 0.1.0-r3 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts + fixes offered upstream (PR 3–5); DXVK 3.1.1, vkd3d-proton 3.0.1 |
+| `app-emulation/adobewine` | 0.2.2 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts (PR 3–7 merged in 0.2.x); DXVK 3.1.1, vkd3d-proton 3.0.1, nvidia-libs 1.0.2 |
 | `app-emulation/wine-adobe` | 11.18 | Wine with the AdobeWine patch set | LGPL-2.1+ | slotted; adobewine needs it with USE `gecko mono vulkan wow64` |
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
-| `app-office/deckcraft` | 0.1.0 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
-| `app-office/deckcraft-bin` | 0.1.0 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
-| `app-office/gridcraft` | 0.1.0 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
-| `app-office/gridcraft-bin` | 0.1.0 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
-| `app-office/wordcraft` | 0.1.0 | WordCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks wordcraft-bin; USE=cjk |
-| `app-office/wordcraft-bin` | 0.1.0 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
-| `app-text/pdfcraft` | 0.2.1 | PdfCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks pdfcraft-bin; USE=mcp |
-| `app-text/pdfcraft-bin` | 0.2.1 | PdfCraft PDF reader and editor (Rust; 0.2.1 was released as PrintCraft) | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
-| `dev-util/claude-code` | 2.1.285 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel) |
+| `app-office/deckcraft` | 0.5.0 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
+| `app-office/deckcraft-bin` | 0.5.0 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
+| `app-office/gridcraft` | 0.5.0 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
+| `app-office/gridcraft-bin` | 0.5.0 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `app-office/wordcraft` | 0.5.0 | WordCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks wordcraft-bin; USE=cjk |
+| `app-office/wordcraft-bin` | 0.5.0 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `app-text/pdfcraft` | 0.6.0 | PdfCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks pdfcraft-bin; USE=mcp |
+| `app-text/pdfcraft-bin` | 0.6.0 | PdfCraft PDF reader and editor (Rust, wgpu); renamed from PrintCraft | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
+| `dev-util/claude-code` | 2.1.287 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel); `::gentoo` carries a newer version, so drop this package once it does again |
 | `dev-util/opencode-bin` | 2.0.26 | OpenCode coding agent (CLI/TUI/web), prebuilt Linux binary | MIT | copy from `::guru`; bumped to the current release |
-| `dev-lang/bun-bin` | 1.3.14 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
+| `dev-lang/bun-bin` | 1.4.3 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
 | `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |
 | `dev-python/anthropic` | 0.116.0 | Claude API client library | MIT | copy from `::guru` |
@@ -437,7 +447,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `dev-python/ezdxf` | 1.4.4 | Create and modify DXF drawings | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/http-snapshot` | 0.1.9 | HTTP snapshot testing | MIT | copy from `::guru`; anthropic test dependency |
 | `dev-python/httpx-aiohttp` | 0.2.0 | aiohttp transport for httpx | BSD | copy from `::guru`; anthropic test dependency |
-| `dev-python/jiter` | 0.16.0 | Fast iterable JSON parser (Rust) | MIT | copy from `::guru`; anthropic dependency |
+| `dev-python/jiter` | 0.17.0 | Fast iterable JSON parser (Rust) | MIT | anthropic dependency; crate tarball on this overlay's `distfiles` release (upstream `fasys-crate-dist` has no 0.17.0) |
 | `dev-python/mupdf` | 1.28.2 | Python bindings for MuPDF | AGPL-3 | PyMuPDF dependency; needs the same `app-text/mupdf` version |
 | `dev-python/pipcl` | 13 | Build helper for MuPDF/PyMuPDF | AGPL-3 | PyMuPDF dependency |
 | `dev-python/playwright` | 1.63.0 | Browser automation (bundled node driver) | Apache-2.0 | browsers live in `~/.cache/ms-playwright` |
@@ -445,38 +455,38 @@ device, e.g. `usermod -aG dialout <user>`.
 | `dev-python/pymupdf-fonts` | 1.0.5 | Optional fonts for PyMuPDF | OFL-1.1 | PyMuPDF dependency |
 | `dev-python/pyee` | 13.0.1 | Port of node's EventEmitter | MIT | playwright dependency (needs <14) |
 | `dev-python/pytest-base-url` | 2.1.0 | pytest plugin for base URLs | MPL-2.0 | pytest-playwright dependency |
-| `dev-python/pytest-playwright` | 0.9.0 | pytest plugin for Playwright | Apache-2.0 | |
+| `dev-python/pytest-playwright` | 0.10.0 | pytest plugin for Playwright | Apache-2.0 | |
 | `dev-python/pyvips` | 3.2.0 | Python binding for libvips | MIT | rayforge dependency |
-| `dev-python/raydriver` | 0.2.0 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
-| `dev-python/raygeo` | 1.59.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
-| `dev-python/ruida-pa` | 0.21.2 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
-| `dev-python/standardwebhooks` | 1.0.1 | Standard Webhooks reference library | MIT | copy from `::guru`; anthropic test dependency |
+| `dev-python/raydriver` | 0.3.0 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/raygeo` | 1.62.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/ruida-pa` | 0.22.0 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
+| `dev-python/standardwebhooks` | 1.1.0 | Standard Webhooks reference library | MIT | anthropic test dependency; hatchling backend since 1.1.0 |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
 | `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-fonts/selawik` | 1.01 | Microsoft's open, metric-compatible fallback for Segoe UI | OFL-1.1 | used by adobewine when no Windows fonts are given |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
-| `media-gfx/cadcraft` | 0.1.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
-| `media-gfx/cadcraft-bin` | 0.1.0 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
-| `media-gfx/designcraft` | 0.2.1 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
-| `media-gfx/designcraft-bin` | 0.2.1 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
+| `media-gfx/cadcraft` | 0.5.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
+| `media-gfx/cadcraft-bin` | 0.5.0 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
+| `media-gfx/designcraft` | 0.6.0 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
+| `media-gfx/designcraft-bin` | 0.6.0 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
-| `media-gfx/lightcraft` | 0.2.1 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
-| `media-gfx/lightcraft-bin` | 0.2.1 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
-| `media-gfx/photocraft` | 0.3.0 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
-| `media-gfx/photocraft-bin` | 0.3.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `media-gfx/lightcraft` | 0.6.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
+| `media-gfx/lightcraft-bin` | 0.6.0 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
+| `media-gfx/photocraft` | 0.7.0 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
+| `media-gfx/photocraft-bin` | 0.7.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
-| `media-gfx/vectorcraft` | 0.5.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
-| `media-gfx/vectorcraft-bin` | 0.5.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `media-gfx/vectorcraft` | 0.9.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
+| `media-gfx/vectorcraft-bin` | 0.9.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/wkhtmltopdf-odoo-bin` | 0.12.6.1_p3 | wkhtmltopdf with patched Qt, for Odoo PDF reports | LGPL-3+ | |
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
-| `media-sound/noson-app` | 5.7.5 | SONOS controller (Qt 6) | GPL-3 | older version in `::guru` |
-| `media-video/effectcraft` | 0.4.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
-| `media-video/effectcraft-bin` | 0.4.0 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
-| `media-video/filmcraft` | 0.2.1 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
-| `media-video/filmcraft-bin` | 0.2.1-r1 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
-| `media-video/stremio` | 1.2.1 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
+| `media-sound/noson-app` | 5.7.6 | SONOS controller (Qt 6) | GPL-3 | newer than `::guru` |
+| `media-video/effectcraft` | 0.8.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
+| `media-video/effectcraft-bin` | 0.8.0 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
+| `media-video/filmcraft` | 0.6.0 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
+| `media-video/filmcraft-bin` | 0.6.0 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
+| `media-video/stremio` | 1.2.2 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
 | `sci-geosciences/qmapshack` | 1.21.1-r101 | QMapShack with surface and way-type analysis of tracks (surface database from OSM extracts, `qms_surfacedb`) and Mapsforge POI v3/v4 | GPL-3+ | `::gentoo` ebuild + 4 patches; test fixture in `files/`; dropped once upstream has it |
 | `kde-plasma/kwin` | 6.7.5-r101 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |

@@ -20,7 +20,7 @@ HOMEPAGE="
 "
 SRC_URI="
 	https://github.com/pydantic/${PN}/archive/refs/tags/v${PV}.tar.gz -> ${P}.gh.tar.gz
-	https://github.com/fasys-crate-dist/${PN}/releases/download/v${PV}/${P}-crates.tar.xz
+	https://github.com/switch87/snakebyte-overlay/releases/download/distfiles/${P}-crates.tar.xz
 "
 S="${WORKDIR}/${P}/crates/jiter-python"
 

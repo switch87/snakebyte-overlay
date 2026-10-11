@@ -3,7 +3,7 @@
 
 EAPI=8
 
-DISTUTILS_USE_PEP517=setuptools
+DISTUTILS_USE_PEP517=hatchling
 PYPI_VERIFY_REPO=https://github.com/standard-webhooks/standard-webhooks
 PYTHON_COMPAT=( python3_{12..15} )
 
@@ -21,11 +21,3 @@ KEYWORDS="~amd64 ~arm64"
 
 EPYTEST_PLUGINS=()
 distutils_enable_tests pytest
-
-src_prepare() {
-	distutils-r1_src_prepare
-
-	# fix build backend
-	# https://bugs.gentoo.org/979160
-	sed -i "/^build-backend = /s/:__legacy__//" pyproject.toml || die
-}

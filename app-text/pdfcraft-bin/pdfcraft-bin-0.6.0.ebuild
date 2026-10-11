@@ -6,7 +6,7 @@ EAPI=8
 inherit xdg
 
 # 0.2.1 was released under the interim name PrintCraft; the project is PdfCraft again.
-MY_PN=printcraft
+MY_PN=pdfcraft
 
 DESCRIPTION="Open-source PDF reader and editor, written in Rust"
 HOMEPAGE="https://getartcraft.com/apps/pdfcraft https://github.com/storytold/pdfcraft"

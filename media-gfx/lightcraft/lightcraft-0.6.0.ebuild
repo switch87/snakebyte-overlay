@@ -21,8 +21,8 @@ SRC_URI="
 LICENSE="|| ( MIT Apache-2.0 )"
 # Dependent crate licenses
 LICENSE+="
-	Apache-2.0 BSD-2 BSD Boost-1.0 IJG ISC MIT UoI-NCSA OFL-1.1
-	UbuntuFontLicense-1.0 Unicode-3.0 ZLIB
+	Apache-2.0 BSD-2 BSD Boost-1.0 CDLA-Permissive-2.0 IJG ISC MIT
+	UoI-NCSA OFL-1.1 UbuntuFontLicense-1.0 Unicode-3.0 ZLIB
 "
 SLOT="0"
 KEYWORDS="~amd64"

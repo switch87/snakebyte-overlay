@@ -52,7 +52,7 @@ CRATES="
 	glam@0.30.10
 	glam@0.31.1
 	glam@0.32.1
-	glam@0.33.10
+	glam@0.33.12
 	hash32@0.3.1
 	hashbrown@0.16.1
 	hashbrown@0.17.1
@@ -64,13 +64,13 @@ CRATES="
 	inventory@0.3.24
 	is-macro@0.3.7
 	itertools@0.11.0
-	itertools@0.14.0
+	itertools@0.15.0
 	itoa@1.0.18
 	jobserver@0.1.35
 	js-sys@0.3.98
 	kurbo@0.13.1
 	lalrpop-util@0.20.2
-	libc@0.2.189
+	libc@0.2.190
 	libm@0.2.16
 	libmimalloc-sys@0.1.49
 	log@0.4.33
@@ -111,8 +111,8 @@ CRATES="
 	pyo3-ffi@0.28.3
 	pyo3-macros-backend@0.28.3
 	pyo3-macros@0.28.3
-	pyo3-stub-gen-derive@0.23.0
-	pyo3-stub-gen@0.23.0
+	pyo3-stub-gen-derive@0.23.1
+	pyo3-stub-gen@0.23.1
 	pyo3@0.28.3
 	quote@1.0.45
 	r-efi@6.0.0
@@ -162,7 +162,7 @@ CRATES="
 	svgtypes@0.16.1
 	swash@0.2.10
 	syn@2.0.117
-	syn@3.0.3
+	syn@3.0.6
 	target-lexicon@0.13.5
 	thiserror-impl@2.0.21
 	thiserror@2.0.21
