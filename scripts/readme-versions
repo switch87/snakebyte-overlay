@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Set each Crafting App's version in README.md's package table to its newest ebuild in the tree.
+
+Usage: scripts/readme-versions   (run from anywhere; edits README.md in place)
+"""
+import glob, os, re
+
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def key(v):
+    return [int(x) if x.isdigit() else x for x in re.split(r"[._-]", v)]
+
+
+def newest(m):
+    pkg, ver = m.group(1), m.group(2)
+    pn = pkg.split("/")[1]
+    if "craft" not in pn:
+        return m.group(0)
+    vers = [os.path.basename(e)[len(pn) + 1:-len(".ebuild")] for e in glob.glob(f"{pkg}/{pn}-*.ebuild")]
+    vers = [v for v in vers if re.match(r"^[0-9]", v)]
+    return m.group(0).replace(f"| {ver} |", f"| {max(vers, key=key)} |", 1) if vers else m.group(0)
+
+
+text = open("README.md").read()
+open("README.md", "w").write(re.sub(r"^\| `([a-z-]+/[a-z0-9-]+)` \| ([0-9][^ |]*) \|", newest, text, flags=re.M))
