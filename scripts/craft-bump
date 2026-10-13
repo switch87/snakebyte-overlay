@@ -38,9 +38,22 @@ WATCH = []
 ASSET = re.compile(r"^(?P<name>[a-z]+)-(?P<ver>[0-9][0-9A-Za-z.\-]*)-linux-x86_64\.tar\.gz$")
 
 
+def github_token():
+    """gh's token, if gh is logged in: unauthenticated API calls hit the 60/hour rate limit."""
+    try:
+        return subprocess.run(["gh", "auth", "token"], text=True, capture_output=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+TOKEN = github_token()
+
+
 def latest_release(repo):
-    req = urllib.request.Request(f"https://api.github.com/repos/storytold/{repo}/releases/latest",
-                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "snakebyte-craft-bump"})
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "snakebyte-craft-bump"}
+    if TOKEN:
+        headers["Authorization"] = f"Bearer {TOKEN}"
+    req = urllib.request.Request(f"https://api.github.com/repos/storytold/{repo}/releases/latest", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r)
@@ -123,7 +136,9 @@ def bump(cat_pn, repo, dry):
 
 
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "craft-bump"
-FONTS_REF = re.compile(r"storytold/craft-fonts\s*\n\s*ref:\s*([0-9a-f]{40})|CRAFT_FONTS_REF:\s*([0-9a-f]{40})")
+# The craft-fonts commit a release embeds: a checkout step's `ref:`, a `CRAFT_FONTS_REF:` env, or
+# (since the shared release workflow) the `craft-fonts-ref:` input passed to it.
+FONTS_REF = re.compile(r"storytold/craft-fonts\s*\n\s*ref:\s*([0-9a-f]{40})|CRAFT_FONTS_REF:\s*([0-9a-f]{40})|craft-fonts-ref:\s*([0-9a-f]{40})")
 
 
 def bump_source(cat_pn, repo, dry):
@@ -162,11 +177,16 @@ def bump_source(cat_pn, repo, dry):
             m = FONTS_REF.search(wf)
             if not m:
                 raise RuntimeError("no craft-fonts commit found in the release workflow")
-            text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2]}"', text)
+            text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2] or m[3]}"', text)
         new.write_text(text)
         crates = work / f"{pn}-{ver}-crates.tar.xz"
         run(["pycargoebuild", "-c", "-f", "-i", str(new), "-d", str(CACHE / "crates"),
              "--crate-tarball-path", str(crates), str(src / "apps" / old_app)])
+        # Git dependencies stay out of the crate tarball: pycargoebuild lists them in GIT_CRATES,
+        # and SRC_URI must fetch them through ${CARGO_CRATE_URIS} (e.g. craft-libs since CADCraft 0.6.2).
+        text = new.read_text()
+        if re.search(r"(?m)^declare -A GIT_CRATES=\(\s*\[", text) and "${CARGO_CRATE_URIS}" not in text:
+            new.write_text(re.sub(r'(?m)^(SRC_URI="(?:.|\n)*?)\n"$', lambda m: m[1] + '\n\t${CARGO_CRATE_URIS}\n"', text, count=1))
         run(["gh", "release", "upload", "distfiles", "-R", "switch87/snakebyte-overlay", str(crates), "--clobber"])
         run(["sudo", "NOCOLOR=true", "ebuild", str(new), "manifest"])
         check = subprocess.run(["pkgcheck", "scan", "--exit=error", cat_pn], cwd=OVERLAY, text=True, capture_output=True)

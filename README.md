@@ -474,7 +474,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
 | `media-gfx/lightcraft` | 0.6.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
 | `media-gfx/lightcraft-bin` | 0.7.1 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
-| `media-gfx/photocraft` | 0.7.0 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
+| `media-gfx/photocraft` | 0.8.2 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
 | `media-gfx/photocraft-bin` | 0.8.2 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
 | `media-gfx/vectorcraft` | 0.9.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
