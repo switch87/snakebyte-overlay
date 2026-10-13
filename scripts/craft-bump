@@ -31,9 +31,10 @@ PACKAGES = {
     "app-office/wordcraft-bin": "wordcraft",
     "media-video/filmcraft-bin": "filmcraft",
     "media-video/effectcraft-bin": "effectcraft",
+    "media-sound/soundcraft-bin": "soundcraft",
 }
 # apps without a package yet: report when they publish a Linux tarball
-WATCH = ["soundcraft"]
+WATCH = []
 ASSET = re.compile(r"^(?P<name>[a-z]+)-(?P<ver>[0-9][0-9A-Za-z.\-]*)-linux-x86_64\.tar\.gz$")
 
 
