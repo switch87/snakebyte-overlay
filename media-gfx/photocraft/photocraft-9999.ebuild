@@ -70,6 +70,9 @@ src_configure() {
 	use avif && myfeatures+=( photocraft-codecs/avif )
 	# HEIC/HEIF decoding (pure Rust); official builds enable it
 	use heif && myfeatures+=( photocraft-codecs/heif )
+	# zbus-lockstep (atspi-common) also probes ../xml for its D-Bus XML and the
+	# last hit wins; in the unversioned vendor dir that is the "xml" crate
+	export LOCKSTEP_XML_PATH="${ECARGO_VENDOR}/atspi-common/xml"
 	cargo_src_configure
 }
 
