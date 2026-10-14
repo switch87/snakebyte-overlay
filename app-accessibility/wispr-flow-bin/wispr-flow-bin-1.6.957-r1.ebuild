@@ -185,11 +185,21 @@ CRATES="
 	zvariant_utils@2.1.0
 "
 
-inherit cargo udev unpacker xdg
+PYTHON_COMPAT=( python3_{12..14} )
+
+inherit cargo edo multiprocessing python-any-r1 udev unpacker xdg
 
 # wispr-flow-linux wrapper release bundling Wispr Flow ${PV}
 WRAPPER_PV="1.0.4"
 HELPER_PV="0.1.2"
+# Newer Electron than the 42.3.0 upstream bundles: Chromium < 151 clamps a
+# Wayland fractional scale below 1 (e.g. KDE 75%) to 1.0, so pointer input
+# misses the controls (crbug.com/438038776, wispr-flow-linux issue #130).
+ELECTRON_PV="44.7.2"
+# native addons of the app, rebuilt for that Electron's ABI
+BSC_PV="12.5.0"
+SQLITE3_PV="5.1.7"
+NAA_PV="7.1.1"
 MY_DEB="wispr-flow_${PV}-${WRAPPER_PV}_amd64.deb"
 
 DESCRIPTION="Wispr Flow voice dictation (unofficial Linux port)"
@@ -201,12 +211,19 @@ SRC_URI="
 	https://github.com/wispr-flow-linux/wispr-flow-linux/releases/download/v${WRAPPER_PV}%2Bwispr${PV}/${MY_DEB}
 	https://github.com/wispr-flow-linux/helper/archive/refs/tags/v${HELPER_PV}.tar.gz
 		-> wispr-flow-linux-helper-${HELPER_PV}.tar.gz
+	https://github.com/electron/electron/releases/download/v${ELECTRON_PV}/electron-v${ELECTRON_PV}-linux-x64.zip
+	https://artifacts.electronjs.org/headers/dist/v${ELECTRON_PV}/node-v${ELECTRON_PV}-headers.tar.gz
+		-> electron-headers-${ELECTRON_PV}.tar.gz
+	https://registry.npmjs.org/better-sqlite3-multiple-ciphers/-/better-sqlite3-multiple-ciphers-${BSC_PV}.tgz
+	https://registry.npmjs.org/sqlite3/-/sqlite3-${SQLITE3_PV}.tgz
+	https://registry.npmjs.org/node-addon-api/-/node-addon-api-${NAA_PV}.tgz
 	${CARGO_CRATE_URIS}
 "
 S="${WORKDIR}/helper-${HELPER_PV}"
 
 # Wispr Flow itself is proprietary; the Linux wrapper and helper are public
-# domain (Unlicense); bundled Electron/Chromium: see LICENSES.chromium.html
+# domain (Unlicense); bundled Electron/Chromium: see LICENSES.chromium.html;
+# better-sqlite3-multiple-ciphers and sqlite3: MIT and BSD
 LICENSE="all-rights-reserved Unlicense MIT BSD"
 # Dependent crate licenses
 LICENSE+=" Apache-2.0 MIT Unicode-3.0 ZLIB"
@@ -214,6 +231,11 @@ SLOT="0"
 KEYWORDS="-* ~amd64"
 RESTRICT="bindist mirror strip"
 
+BDEPEND="
+	app-arch/unzip
+	net-libs/nodejs[npm]
+	${PYTHON_DEPS}
+"
 RDEPEND="
 	app-accessibility/at-spi2-core:2
 	dev-libs/expat
@@ -246,13 +268,72 @@ PATCHES=(
 
 QA_PREBUILT="usr/lib/wispr-flow/*"
 
+pkg_setup() {
+	rust_pkg_setup
+	python-any-r1_pkg_setup
+}
+
 src_unpack() {
 	mkdir "${WORKDIR}"/deb || die
 	cd "${WORKDIR}"/deb || die
 	unpack_deb "${MY_DEB}"
 	cd "${WORKDIR}" || die
 	unpack wispr-flow-linux-helper-${HELPER_PV}.tar.gz
-	cargo_src_unpack
+	# crates only: cargo_src_unpack would unpack every other archive in ${A}
+	# into ${WORKDIR} as well
+	mkdir -p "${ECARGO_VENDOR}" || die
+	cargo_crate_unpack
+	cargo_gen_config
+
+	mkdir "${WORKDIR}"/electron || die
+	cd "${WORKDIR}"/electron || die
+	unpack electron-v${ELECTRON_PV}-linux-x64.zip
+	cd "${WORKDIR}" || die
+	unpack electron-headers-${ELECTRON_PV}.tar.gz
+
+	local pkg
+	for pkg in better-sqlite3-multiple-ciphers-${BSC_PV} sqlite3-${SQLITE3_PV} \
+			node-addon-api-${NAA_PV}; do
+		mkdir "${WORKDIR}"/${pkg} || die
+		tar -xzf "${DISTDIR}"/${pkg}.tgz -C "${WORKDIR}"/${pkg} \
+			--strip-components=1 || die
+	done
+	# sqlite3's binding.gyp resolves node-addon-api through require()
+	mkdir "${WORKDIR}"/sqlite3-${SQLITE3_PV}/node_modules || die
+	mv "${WORKDIR}"/node-addon-api-${NAA_PV} \
+		"${WORKDIR}"/sqlite3-${SQLITE3_PV}/node_modules/node-addon-api || die
+}
+
+src_prepare() {
+	default
+	# better-sqlite3-multiple-ciphers 12.5.0 does not build against the V8 of
+	# Electron >= 42 unpatched; patch from the wispr-flow-linux port
+	pushd "${WORKDIR}"/better-sqlite3-multiple-ciphers-${BSC_PV} >/dev/null || die
+	eapply "${FILESDIR}"/better-sqlite3-multiple-ciphers-${BSC_PV}-v8-14.8.patch
+	popd >/dev/null || die
+
+	# sqlite3 unpacks its bundled SQLite with the npm "tar" package; use the
+	# system tar instead of vendoring it
+	cat > "${WORKDIR}"/sqlite3-${SQLITE3_PV}/deps/extract.js <<-'EOF' || die
+		const path = require("path");
+		require("child_process").execFileSync("tar", ["-xzf",
+			path.resolve(process.argv[2]), "-C", path.resolve(process.argv[3])]);
+	EOF
+}
+
+src_compile() {
+	cargo_src_compile
+
+	local pkg gyp=(
+		node "${BROOT}"/usr/$(get_libdir)/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js
+		rebuild --nodedir="${WORKDIR}"/node_headers --target=${ELECTRON_PV}
+		--runtime=electron --arch=x64 --jobs="$(makeopts_jobs)"
+	)
+	for pkg in better-sqlite3-multiple-ciphers-${BSC_PV} sqlite3-${SQLITE3_PV}; do
+		pushd "${WORKDIR}"/${pkg} >/dev/null || die
+		edo "${gyp[@]}"
+		popd >/dev/null || die
+	done
 }
 
 src_install() {
@@ -260,6 +341,24 @@ src_install() {
 
 	# Windows-only native modules shipped inside the upstream app
 	rm "${deb}${dir}"/resources/app.asar.unpacked/.webpack/main/native_modules/lib/crypt32-*.node || die
+
+	# swap the bundled Electron runtime for ${ELECTRON_PV}; keep the app and
+	# the wrapper's launcher scripts
+	local f
+	for f in "${deb}${dir}"/*; do
+		case ${f##*/} in
+			resources|launcher-common.sh|doctor.sh|*.rules) ;;
+			*) rm -r "${f}" || die ;;
+		esac
+	done
+	cp -a "${WORKDIR}"/electron/. "${deb}${dir}"/ || die
+	rm -f "${deb}${dir}"/resources/default_app.asar || die
+	mv "${deb}${dir}"/electron "${deb}${dir}"/wispr-flow || die
+
+	local native=${deb}${dir}/resources/app.asar.unpacked/.webpack/main/native_modules/build/Release
+	cp "${WORKDIR}"/better-sqlite3-multiple-ciphers-${BSC_PV}/build/Release/better_sqlite3.node \
+		"${WORKDIR}"/sqlite3-${SQLITE3_PV}/build/Release/node_sqlite3.node \
+		"${native}"/ || die
 
 	# our helper build replaces the prebuilt one
 	cp "$(cargo_target_dir)"/wispr-flow-linux-helper \
