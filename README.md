@@ -466,7 +466,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-fonts/selawik` | 1.01 | Microsoft's open, metric-compatible fallback for Segoe UI | OFL-1.1 | used by adobewine when no Windows fonts are given |
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
-| `media-gfx/cadcraft` | 0.8.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
+| `media-gfx/cadcraft` | 0.10.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
 | `media-gfx/cadcraft-bin` | 0.10.0 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
 | `media-gfx/designcraft` | 0.7.1 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
 | `media-gfx/designcraft-bin` | 0.11.0 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
