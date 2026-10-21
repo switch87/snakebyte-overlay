@@ -431,7 +431,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
 | `app-office/deckcraft` | 0.6.1 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
 | `app-office/deckcraft-bin` | 0.9.0 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
-| `app-office/gridcraft` | 0.9.0 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
+| `app-office/gridcraft` | 0.10.0 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
 | `app-office/gridcraft-bin` | 0.10.0 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `app-office/wordcraft` | 0.6.1 | WordCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks wordcraft-bin; USE=cjk |
 | `app-office/wordcraft-bin` | 0.9.0 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
