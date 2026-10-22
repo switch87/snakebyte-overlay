@@ -76,6 +76,49 @@ def ebuild_version(path, pn):
     return path.name[len(pn) + 1:-len(".ebuild")]
 
 
+def release_ebuilds(pkgdir, pn):
+    """The package's ebuilds, oldest first, without live (9999) ones: a live ebuild is no
+    template for a release (photocraft-9999 sorted last and became a broken 0.9.0)."""
+    ebuilds = [p for p in pkgdir.glob(f"{pn}-*.ebuild") if not ebuild_version(p, pn).startswith("9999")]
+    return sorted(ebuilds, key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", ebuild_version(p, pn))])
+
+
+# Cargo.toml's [patch.crates-io] can point crates at git repositories (krilla, hayro and winit
+# since DesignCraft 0.10 / VectorCraft 0.14). The cargo eclass only patches the git URLs to the
+# unpacked GIT_CRATES, so cargo would still try to fetch these; a [patch.crates-io] in the cargo
+# config wins over the one in Cargo.toml, so the ebuild writes one there.
+PATCH_CRATES_IO = r"""
+	# Cargo.toml's [patch.crates-io] points crates at git; the eclass only patches the
+	# git URLs, so send those crates to the unpacked GIT_CRATES too (the cargo config's
+	# [patch] wins over Cargo.toml's).
+	local crate uri commit dir
+	{
+		echo "[patch.crates-io]"
+		for crate in $(sed -n '/^\[patch\.crates-io\]/,/^\[/s/^\([A-Za-z0-9_-]\+\) *= *{.*git *=.*/\1/p' Cargo.toml); do
+			IFS=';' read -r uri commit dir _ <<< "${GIT_CRATES[${crate}]}"
+			[[ -n ${commit} ]] || die "${crate} is patched from git but not in GIT_CRATES"
+			dir=${dir:-${crate}-%commit%}
+			echo "${crate} = { path = \"${WORKDIR}/${dir//%commit%/${commit}}\" }"
+		done
+	} >> "${ECARGO_HOME}"/config.toml || die
+"""
+
+
+def add_patch_crates_io(text, src):
+    """Add the [patch.crates-io] redirect to the ebuild when upstream patches crates-io from git."""
+    if "patch.crates-io" in text:
+        return text
+    section = re.search(r"(?ms)^\[patch\.crates-io\]\n(.*?)(?=^\[|\Z)", (src / "Cargo.toml").read_text())
+    if not section or not re.search(r"(?m)^[A-Za-z0-9_-]+\s*=\s*\{.*\bgit\s*=", section[1]):
+        return text
+    if re.search(r"(?m)^src_prepare\(\) \{\n\tdefault\n", text):
+        return re.sub(r"(?m)^(src_prepare\(\) \{\n\tdefault\n)", lambda m: m[1] + PATCH_CRATES_IO[1:], text, count=1)
+    phase = re.search(r"(?m)^src_(configure|compile)\(\) \{", text)
+    if "src_prepare()" in text or not phase:
+        raise RuntimeError("Cargo.toml patches crates-io from git; add the [patch.crates-io] redirect to src_prepare by hand")
+    return text[:phase.start()] + "src_prepare() {\n\tdefault" + PATCH_CRATES_IO + "}\n\n" + text[phase.start():]
+
+
 def gentoo_version(tag_ver):
     # 0.4.0 stays 0.4.0; 0.5.0-rc.1 -> 0.5.0_rc1
     return re.sub(r"-rc\.?(\d+)", r"_rc\1", tag_ver)
@@ -102,8 +145,7 @@ def bump(cat_pn, repo, dry):
     if dry:
         return f"{cat_pn}: NEW {ver} available (dry run)"
 
-    ebuilds = sorted(pkgdir.glob(f"{pn}-*.ebuild"),
-                     key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", ebuild_version(p, pn))])
+    ebuilds = release_ebuilds(pkgdir, pn)
     text = ebuilds[-1].read_text()
     if "MY_PN=" in text:
         text = re.sub(r"(?m)^MY_PN=.*$", f"MY_PN={name}", text)
@@ -157,10 +199,11 @@ def bump_source(cat_pn, repo, dry):
     if dry:
         return f"{cat_pn}: NEW {ver} available (dry run)"
 
-    ebuilds = sorted(pkgdir.glob(f"{pn}-*.ebuild"),
-                     key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", ebuild_version(p, pn))])
+    ebuilds = release_ebuilds(pkgdir, pn)
     old = ebuilds[-1]
     text = old.read_text()
+    if not re.search(r"(?m)^CRATES=", text):
+        return f"{cat_pn}: FAILED {ver}: {old.name} has no CRATES= (not a crate-tarball ebuild); fix the newest release ebuild by hand"
     work = CACHE / f"{pn}-{ver}"
     new = pkgdir / f"{pn}-{ver}.ebuild"
     try:
@@ -179,6 +222,7 @@ def bump_source(cat_pn, repo, dry):
             if not m:
                 raise RuntimeError("no craft-fonts commit found in the release workflow")
             text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2] or m[3]}"', text)
+        text = add_patch_crates_io(text, src)
         new.write_text(text)
         crates = work / f"{pn}-{ver}-crates.tar.xz"
         run(["pycargoebuild", "-c", "-f", "-i", str(new), "-d", str(CACHE / "crates"),

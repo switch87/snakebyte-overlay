@@ -468,7 +468,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/cadcraft` | 0.10.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
 | `media-gfx/cadcraft-bin` | 0.10.0 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
-| `media-gfx/designcraft` | 0.7.1 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
+| `media-gfx/designcraft` | 0.12.0 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
 | `media-gfx/designcraft-bin` | 0.11.0 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
