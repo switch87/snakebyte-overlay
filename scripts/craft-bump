@@ -22,6 +22,7 @@ OVERLAY = Path(__file__).resolve().parent.parent
 PACKAGES = {
     "media-gfx/photocraft-bin": "photocraft",
     "media-gfx/designcraft-bin": "designcraft",
+    "media-gfx/figcraft-bin": "figcraft",
     "media-gfx/vectorcraft-bin": "vectorcraft",
     "media-gfx/cadcraft-bin": "cadcraft",
     "media-gfx/lightcraft-bin": "lightcraft",

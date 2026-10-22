@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>gert@pellin.be</email>
+		<name>Gert Pellin</name>
+	</maintainer>
+	<upstream>
+		<remote-id type="github">storytold/figcraft</remote-id>
+	</upstream>
+	<longdescription lang="en">
+		FigCraft is a clean-room reimplementation of a Figma-style interface design and prototyping application in pure Rust: frames, components, auto layout and prototypes, rendered on the GPU (wgpu). Installed from the upstream Linux tarball; the binary only
+		links against glibc and loads the graphics libraries at runtime. Early alpha.
+	</longdescription>
+</pkgmetadata>
