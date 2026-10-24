@@ -475,7 +475,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/lightcraft` | 0.11.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
 | `media-gfx/lightcraft-bin` | 0.13.0 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
 | `media-gfx/photocraft` | 9999 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
-| `media-gfx/photocraft-bin` | 0.14.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
+| `media-gfx/photocraft-bin` | 0.15.1 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/snapmaker-luban-bin` | 4.15.2 | Snapmaker Luban (3D printing, laser, CNC) | AGPL-3+ (bundled Electron: MIT, BSD) | bundles Electron 15 |
 | `media-gfx/vectorcraft` | 0.10.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
 | `media-gfx/vectorcraft-bin` | 0.16.0 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
