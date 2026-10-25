@@ -429,7 +429,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
 | `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
-| `app-office/deckcraft` | 0.10.0 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
+| `app-office/deckcraft` | 0.11.1 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
 | `app-office/deckcraft-bin` | 0.11.1 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `app-office/gridcraft` | 0.11.1 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
 | `app-office/gridcraft-bin` | 0.12.1 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
