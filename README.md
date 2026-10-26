@@ -483,7 +483,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
 | `media-sound/noson-app` | 5.7.6 | SONOS controller (Qt 6) | GPL-3 | newer than `::guru` |
 | `media-sound/soundcraft-bin` | 0.13.1 | SoundCraft digital audio workstation (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
-| `media-video/effectcraft` | 0.16.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
+| `media-video/effectcraft` | 0.17.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
 | `media-video/effectcraft-bin` | 0.17.0 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `media-video/filmcraft` | 0.12.0 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
 | `media-video/filmcraft-bin` | 0.13.0 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
