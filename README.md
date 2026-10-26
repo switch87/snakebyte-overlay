@@ -472,7 +472,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/designcraft-bin` | 0.13.0 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
-| `media-gfx/lightcraft` | 0.13.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
+| `media-gfx/lightcraft` | 0.14.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
 | `media-gfx/lightcraft-bin` | 0.14.0 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
 | `media-gfx/photocraft` | 9999 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
 | `media-gfx/photocraft-bin` | 0.16.0 | PhotoCraft layered image editor with PSD support (Rust, Vulkan) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
