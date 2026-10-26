@@ -485,7 +485,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-sound/soundcraft-bin` | 0.13.1 | SoundCraft digital audio workstation (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `media-video/effectcraft` | 0.17.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
 | `media-video/effectcraft-bin` | 0.17.0 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
-| `media-video/filmcraft` | 0.12.0 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
+| `media-video/filmcraft` | 0.13.0 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
 | `media-video/filmcraft-bin` | 0.13.0 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
 | `media-video/stremio` | 1.2.2 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
