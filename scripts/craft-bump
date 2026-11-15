@@ -90,24 +90,40 @@ def release_ebuilds(pkgdir, pn):
 PATCH_CRATES_IO = r"""
 	# Cargo.toml's [patch.crates-io] points crates at git; the eclass only patches the
 	# git URLs, so send those crates to the unpacked GIT_CRATES too (the cargo config's
-	# [patch] wins over Cargo.toml's).
-	local crate uri commit dir
+	# [patch] wins over Cargo.toml's). pycargoebuild only lists the git crates the app
+	# itself uses, but cargo loads every patched crate the workspace lock knows: find
+	# those in the already unpacked tarball of the same repository and commit.
+	local crate uri commit dir line url rev k base found
 	{
 		echo "[patch.crates-io]"
 		for crate in $(sed -n '/^\[patch\.crates-io\]/,/^\[/s/^\([A-Za-z0-9_-]\+\) *= *{.*git *=.*/\1/p' Cargo.toml); do
-			IFS=';' read -r uri commit dir _ <<< "${GIT_CRATES[${crate}]}"
-			# Cargo ignores [patch] entries the lockfile doesn't use (e.g. egui_kittest);
-			# pycargoebuild leaves those out of GIT_CRATES, so skip them too.
-			[[ -n ${commit} ]] || { einfo "${crate}: patched from git but unused, skipped"; continue; }
-			dir=${dir:-${crate}-%commit%}
-			echo "${crate} = { path = \"${WORKDIR}/${dir//%commit%/${commit}}\" }"
+			if [[ -n ${GIT_CRATES[${crate}]} ]]; then
+				IFS=';' read -r uri commit dir _ <<< "${GIT_CRATES[${crate}]}"
+				dir=${dir:-${crate}-%commit%}
+				echo "${crate} = { path = \"${WORKDIR}/${dir//%commit%/${commit}}\" }"
+				continue
+			fi
+			line=$(sed -n "/^\[patch\.crates-io\]/,/^\[/{/^${crate} *=/p}" Cargo.toml)
+			url=$(sed -n 's/.*git *= *"\([^"]*\)".*/\1/p' <<< "${line}")
+			rev=$(sed -n 's/.*rev *= *"\([^"]*\)".*/\1/p' <<< "${line}")
+			found=
+			for k in "${!GIT_CRATES[@]}"; do
+				IFS=';' read -r uri commit dir _ <<< "${GIT_CRATES[${k}]}"
+				[[ ${uri%.git} == "${url%.git}" && ${commit} == "${rev}" ]] || continue
+				base=${dir:-${k}-%commit%}
+				base=${WORKDIR}/${base%%/*}
+				base=${base//%commit%/${commit}}
+				found=$(grep -rlE --include=Cargo.toml "^name *= *\"${crate}\"" "${base}" | head -n1)
+				break
+			done
+			if [[ -n ${found} ]]; then
+				echo "${crate} = { path = \"${found%/Cargo.toml}\" }"
+			else
+				einfo "${crate}: patched from git but not fetched, skipped"
+			fi
 		done
 	} >> "${ECARGO_HOME}"/config.toml || die
 """
-
-
-PATCH_DIE = '''			[[ -n ${commit} ]] || die "${crate} is patched from git but not in GIT_CRATES"'''
-PATCH_SKIP = PATCH_CRATES_IO.split("\n")[9] + "\n" + PATCH_CRATES_IO.split("\n")[10] + "\n" + PATCH_CRATES_IO.split("\n")[11]
 
 
 def add_patch_crates_io(text, src):
@@ -228,7 +244,7 @@ def bump_source(cat_pn, repo, dry):
             if not m:
                 raise RuntimeError("no craft-fonts commit found in the release workflow")
             text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2] or m[3]}"', text)
-        text = text.replace(PATCH_DIE, PATCH_SKIP)
+        text = re.sub(r"(?ms)^\t# Cargo\.toml's \[patch\.crates-io\] points.*?\} >> \"\$\{ECARGO_HOME\}\"/config\.toml \|\| die\n", lambda m: PATCH_CRATES_IO[1:], text)
         text = add_patch_crates_io(text, src)
         new.write_text(text)
         crates = work / f"{pn}-{ver}-crates.tar.xz"
