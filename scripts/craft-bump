@@ -96,12 +96,18 @@ PATCH_CRATES_IO = r"""
 		echo "[patch.crates-io]"
 		for crate in $(sed -n '/^\[patch\.crates-io\]/,/^\[/s/^\([A-Za-z0-9_-]\+\) *= *{.*git *=.*/\1/p' Cargo.toml); do
 			IFS=';' read -r uri commit dir _ <<< "${GIT_CRATES[${crate}]}"
-			[[ -n ${commit} ]] || die "${crate} is patched from git but not in GIT_CRATES"
+			# Cargo ignores [patch] entries the lockfile doesn't use (e.g. egui_kittest);
+			# pycargoebuild leaves those out of GIT_CRATES, so skip them too.
+			[[ -n ${commit} ]] || { einfo "${crate}: patched from git but unused, skipped"; continue; }
 			dir=${dir:-${crate}-%commit%}
 			echo "${crate} = { path = \"${WORKDIR}/${dir//%commit%/${commit}}\" }"
 		done
 	} >> "${ECARGO_HOME}"/config.toml || die
 """
+
+
+PATCH_DIE = '''			[[ -n ${commit} ]] || die "${crate} is patched from git but not in GIT_CRATES"'''
+PATCH_SKIP = PATCH_CRATES_IO.split("\n")[9] + "\n" + PATCH_CRATES_IO.split("\n")[10] + "\n" + PATCH_CRATES_IO.split("\n")[11]
 
 
 def add_patch_crates_io(text, src):
@@ -222,6 +228,7 @@ def bump_source(cat_pn, repo, dry):
             if not m:
                 raise RuntimeError("no craft-fonts commit found in the release workflow")
             text = re.sub(r'(?m)^CRAFT_FONTS_COMMIT=".*"$', f'CRAFT_FONTS_COMMIT="{m[1] or m[2] or m[3]}"', text)
+        text = text.replace(PATCH_DIE, PATCH_SKIP)
         text = add_patch_crates_io(text, src)
         new.write_text(text)
         crates = work / f"{pn}-{ver}-crates.tar.xz"
