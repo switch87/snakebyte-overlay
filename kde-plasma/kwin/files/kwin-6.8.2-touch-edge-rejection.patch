@@ -1,17 +1,18 @@
-Touch edge rejection for KWin 6.7.5 (branch touchscreen-edge-rejection in
+Touch edge rejection for KWin 6.8.2 (branch touchscreen-edge-rejection in
 ~/Workspace/src/kwin, not upstream): a touch that starts closer than a
 per-device width to an edge of a touch screen is held back until it moves
 more than 3 mm, and dropped when it ends before that. The width is the
 InputDevice D-Bus property touchEdgeRejectionWidth (TouchEdgeRejectionWidth
 in kcminputrc, 0 to 10 mm, default 0 = off).
 
-Generated with: git diff v6.7.5 touchscreen-edge-rejection-6.7.5 -- . ':!autotests'
-in ~/Workspace/src/kwin-6.7.5 (the tests ran on that branch; the ebuild has
-RESTRICT="test"). Applies with -p1 to kwin-6.7.5.tar.xz after
-kwin-6.7.5-patchset-1.
+Generated with: git diff v6.8.2 touchscreen-edge-rejection-6.8.2 -- . ':!autotests'
+in ~/Workspace/src/kwin-6.8.2 (the three commits cherry-picked cleanly from
+the 6.7.5 backport; the tests ran on that branch; the ebuild has
+RESTRICT="test"). Applies with -p1 to kwin-6.8.2.tar.xz after
+kwin-6.8.2-patchset-1 and the ::gentoo patches of -r2.
 
 diff --git a/src/backends/libinput/CMakeLists.txt b/src/backends/libinput/CMakeLists.txt
-index 1a19d1c..9d76922 100644
+index 1a19d1cb..9d76922a 100644
 --- a/src/backends/libinput/CMakeLists.txt
 +++ b/src/backends/libinput/CMakeLists.txt
 @@ -21,5 +21,6 @@ target_sources(kwin PRIVATE
@@ -22,7 +23,7 @@ index 1a19d1c..9d76922 100644
  )
  target_link_libraries(kwin PRIVATE Libinput::Libinput)
 diff --git a/src/backends/libinput/connection.cpp b/src/backends/libinput/connection.cpp
-index 1a644d2..05bd47f 100644
+index 9972b3d5..9aa71071 100644
 --- a/src/backends/libinput/connection.cpp
 +++ b/src/backends/libinput/connection.cpp
 @@ -178,7 +178,7 @@ void Connection::handleEvent()
@@ -35,7 +36,7 @@ index 1a644d2..05bd47f 100644
      if (wasEmpty && !m_eventQueue.empty()) {
          Q_EMIT eventsRead();
 diff --git a/src/backends/libinput/device.cpp b/src/backends/libinput/device.cpp
-index 3bb29ae..2b1a0af 100644
+index ec52ac42..b3c47062 100644
 --- a/src/backends/libinput/device.cpp
 +++ b/src/backends/libinput/device.cpp
 @@ -22,6 +22,7 @@
@@ -52,9 +53,9 @@ index 3bb29ae..2b1a0af 100644
      Rotation,
 +    TouchEdgeRejectionWidth,
      OutputUuid,
+     ScrollButtonLock,
  };
- 
-@@ -270,6 +272,7 @@ static const QMap<ConfigKey, std::shared_ptr<ConfigDataBase>> s_configData{
+@@ -272,6 +274,7 @@ static const QMap<ConfigKey, std::shared_ptr<ConfigDataBase>> s_configData{
      {ConfigKey::InputArea, std::make_shared<ConfigData<QRectF>>(QByteArrayLiteral("InputArea"), &Device::setInputArea, &Device::defaultInputArea)},
      {ConfigKey::TabletToolRelativeMode, std::make_shared<ConfigData<bool>>(QByteArrayLiteral("TabletToolRelativeMode"), &Device::setTabletToolRelative, &Device::defaultTabletToolIsRelative)},
      {ConfigKey::Rotation, std::make_shared<ConfigData<uint32_t>>(QByteArrayLiteral("Rotation"), &Device::setRotation, &Device::defaultRotation)},
@@ -62,7 +63,7 @@ index 3bb29ae..2b1a0af 100644
  };
  
  namespace
-@@ -799,6 +802,19 @@ void Device::setScrollFactor(qreal factor)
+@@ -802,6 +805,19 @@ void Device::setScrollFactor(qreal factor)
      }
  }
  
@@ -83,7 +84,7 @@ index 3bb29ae..2b1a0af 100644
  {
      const auto matrix = deserializeMatrix(value);
 diff --git a/src/backends/libinput/device.h b/src/backends/libinput/device.h
-index 4905480..112114c 100644
+index f9343dc0..6e730fa3 100644
 --- a/src/backends/libinput/device.h
 +++ b/src/backends/libinput/device.h
 @@ -10,6 +10,7 @@
@@ -104,7 +105,7 @@ index 4905480..112114c 100644
  
      Q_PROPERTY(bool supportsLeftHanded READ supportsLeftHanded CONSTANT)
      Q_PROPERTY(bool leftHandedEnabledByDefault READ leftHandedEnabledByDefault CONSTANT)
-@@ -505,6 +509,35 @@ public:
+@@ -522,6 +526,35 @@ public:
      static QString serializeMatrix(const QMatrix4x4 &matrix);
      static QMatrix4x4 deserializeMatrix(const QString &matrix);
  
@@ -140,7 +141,7 @@ index 4905480..112114c 100644
      QString defaultPressureCurve() const;
      QEasingCurve pressureCurve() const;
      QString serializedPressureCurve() const;
-@@ -818,6 +851,7 @@ Q_SIGNALS:
+@@ -836,6 +869,7 @@ Q_SIGNALS:
      void tabletToolRelativeChanged();
      void rotationChanged();
      void currentModesChanged();
@@ -148,7 +149,7 @@ index 4905480..112114c 100644
  
  private:
      template<typename T>
-@@ -925,6 +959,8 @@ private:
+@@ -945,6 +979,8 @@ private:
      bool m_tabletToolIsRelative = false;
      QList<unsigned int> m_currentModes;
      bool m_isVirtual = false;
@@ -159,7 +160,7 @@ index 4905480..112114c 100644
  }
 diff --git a/src/backends/libinput/touchedgefilter.cpp b/src/backends/libinput/touchedgefilter.cpp
 new file mode 100644
-index 0000000..55d6a9a
+index 00000000..55d6a9a8
 --- /dev/null
 +++ b/src/backends/libinput/touchedgefilter.cpp
 @@ -0,0 +1,79 @@
@@ -244,7 +245,7 @@ index 0000000..55d6a9a
 +}
 diff --git a/src/backends/libinput/touchedgefilter.h b/src/backends/libinput/touchedgefilter.h
 new file mode 100644
-index 0000000..bfa61b2
+index 00000000..bfa61b23
 --- /dev/null
 +++ b/src/backends/libinput/touchedgefilter.h
 @@ -0,0 +1,70 @@

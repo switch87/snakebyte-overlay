@@ -1,13 +1,12 @@
-Touch edge rejection setting for the Touchscreen KCM of plasma-desktop 6.7.5
+Touch edge rejection setting for the Touchscreen KCM of plasma-desktop 6.8.2
 (branch touchscreen-edge-rejection in ~/Workspace/src/plasma-desktop, not
 upstream): "Ignore touches starting near the edge" (Off, 0.5 to 10 mm) with
 the width in pixels, bound to KWin's touchEdgeRejectionWidth. Needs the KWin
-patch kwin-6.7.5-touch-edge-rejection.patch at build time (D-Bus interface).
+patch kwin-6.8.2-touch-edge-rejection.patch at build time (D-Bus interface).
 
-Generated with: git diff v6.7.5 touchscreen-edge-rejection-6.7.5 -- . ':!kcms/libkwindevices/tests'
-in ~/Workspace/src/plasma-desktop-6.7.5 (the tests ran on that branch).
-Applies with -p1 to plasma-desktop-6.7.5.tar.xz after
-plasma-desktop-6.1.80-override-include-dirs.patch.
+Generated with: git diff v6.8.2 touchscreen-edge-rejection-6.8.2 -- . ':!kcms/libkwindevices/tests'
+in ~/Workspace/src/plasma-desktop-6.8.2 (the tests ran on that branch).
+Applies with -p1 to plasma-desktop-6.8.2.tar.xz.
 
 diff --git a/kcms/libkwindevices/inputdevice.cpp b/kcms/libkwindevices/inputdevice.cpp
 index 76ed376b..9ad24284 100644

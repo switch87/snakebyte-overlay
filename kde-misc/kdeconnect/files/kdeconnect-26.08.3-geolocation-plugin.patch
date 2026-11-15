@@ -1,13 +1,12 @@
 KDE Connect geolocation plugin (desktop side of kdeconnect-android!529),
-backported to kdeconnect-kde 26.04.3, plus upstream 6c1238802 "Flip
-capabilities in loopbackdevice" (in master, not in 26.04.x; needed for
+forward-ported to kdeconnect-kde 26.08.3, plus upstream 6c1238802 "Flip
+capabilities in loopbackdevice" (in master, not in 26.08.x; needed for
 tests/pluginloadtest to see the plugin as supported).
 
-Generated with: git diff <pick of 51dfea90b> <last geolocation commit> on
-branch stable-26.04.3 (the same diff as git diff v26.04.3 geolocation-26.04.3:
-the geolocation-nmea commits without the development-only coverage script
-commit 2bd59de57, plus 6c1238802).
-Applies with -p1 after kdeconnect-26.04.3-tcp-keepalive.patch.
+Generated with: git diff <pick of 51dfea90b> <geolocation commit> on
+branch stable-26.08.3 in ~/Workspace/src/kdeconnect-kde-26.08.3 (the
+26.04.3 patch applied without changes).
+Applies with -p1 after kdeconnect-26.08.3-tcp-keepalive.patch.
 
 diff --git a/core/backends/loopback/loopbackdevicelink.cpp b/core/backends/loopback/loopbackdevicelink.cpp
 index 1c5d1138e..0e57cb5cf 100644
@@ -25,10 +24,10 @@ index 1c5d1138e..0e57cb5cf 100644
  
  #include "moc_loopbackdevicelink.cpp"
 diff --git a/core/device.cpp b/core/device.cpp
-index e37db762c..db8f044fd 100644
+index e502be9ae..4f452e13a 100644
 --- a/core/device.cpp
 +++ b/core/device.cpp
-@@ -274,6 +274,9 @@ void Device::pairingHandler_unpaired()
+@@ -286,6 +286,9 @@ void Device::pairingHandler_unpaired()
  void Device::addLink(DeviceLink *link)
  {
      if (d->m_deviceLinks.contains(link)) {
@@ -1019,10 +1018,10 @@ index 000000000..c1bf18445
 +    QList<QTcpSocket *> m_clients;
 +};
 diff --git a/plugins/kdeconnect.notifyrc b/plugins/kdeconnect.notifyrc
-index 6ee7fbcde..67ba44d15 100644
+index f0e5607fa..977ad0c61 100644
 --- a/plugins/kdeconnect.notifyrc
 +++ b/plugins/kdeconnect.notifyrc
-@@ -1162,3 +1162,8 @@ Name[uk]=Помилка
+@@ -1164,3 +1164,8 @@ Name[uk]=Помилка
  Name[zh_CN]=错误
  Name[zh_TW]=錯誤
  Action=Popup

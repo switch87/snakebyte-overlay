@@ -8,7 +8,7 @@ ECM_HANDBOOK="optional"
 # TODO: ECMGenerateQDoc
 ECM_TEST="true"
 PYTHON_COMPAT=( python3_{12..15} )
-KFMIN=6.26.0
+KFMIN=6.30.0
 QTMIN=6.11.2
 inherit ecm fcaps plasma.kde.org python-any-r1 toolchain-funcs xdg
 
@@ -17,8 +17,9 @@ SRC_URI+=" https://dev.gentoo.org/~asturm/distfiles/kde/${PATCHSET}.tar.xz"
 
 LICENSE="GPL-2+"
 SLOT="6"
-KEYWORDS="amd64 arm64 ~ppc64 ~riscv ~x86"
-IUSE="accessibility gamepad gles2-only lock screencast selinux +shortcuts systemd X"
+KEYWORDS="~amd64 ~arm64"
+IUSE="accessibility activities gamepad gles2-only lock screencast selinux
++shortcuts systemd X"
 
 RESTRICT="test"
 
@@ -27,7 +28,7 @@ RESTRICT="test"
 COMMON_DEPEND="
 	>=dev-libs/libei-1.4
 	>=dev-libs/libinput-1.30:=
-	>=dev-libs/wayland-1.24.0
+	>=dev-libs/wayland-1.26.0
 	>=dev-qt/qt5compat-${QTMIN}:6[qml]
 	>=dev-qt/qtbase-${QTMIN}:6=[accessibility=,gles2-only=,gui,libinput,opengl,wayland,widgets,X]
 	>=dev-qt/qtdeclarative-${QTMIN}:6
@@ -56,7 +57,6 @@ COMMON_DEPEND="
 	>=kde-plasma/kdecoration-${KDE_CATV}:6
 	>=kde-plasma/knighttime-${KDE_CATV}:6
 	>=kde-plasma/kwayland-${KDE_CATV}:6
-	>=kde-plasma/plasma-activities-${KDE_CATV}:6=
 	media-libs/lcms:2
 	media-libs/libcanberra
 	>=media-libs/libdisplay-info-0.2.0:=
@@ -69,9 +69,10 @@ COMMON_DEPEND="
 	>=x11-libs/libxcvt-0.1.1
 	>=x11-libs/libxkbcommon-1.5.0
 	accessibility? ( media-libs/libqaccessibilityclient:6 )
+	activities? ( >=kde-plasma/plasma-activities-${KDE_CATV}:6= )
 	gamepad? ( dev-libs/libevdev )
 	lock? ( >=kde-plasma/kscreenlocker-${KDE_CATV}:6 )
-	screencast? ( >=media-video/pipewire-1.2.0:= )
+	screencast? ( >=media-video/pipewire-1.4.0:= )
 	shortcuts? ( >=kde-plasma/kglobalacceld-${KDE_CATV}:6 )
 	systemd? ( sys-apps/systemd:= )
 	X? (
@@ -85,7 +86,6 @@ COMMON_DEPEND="
 	)
 "
 RDEPEND="${COMMON_DEPEND}
-	!kde-plasma/kdeplasma-addons:5
 	>=kde-frameworks/kirigami-${KFMIN}:6
 	>=kde-frameworks/kitemmodels-${KFMIN}:6
 	>=kde-plasma/aurorae-${KDE_CATV}:6
@@ -97,18 +97,18 @@ RDEPEND="${COMMON_DEPEND}
 	X? ( >=x11-base/xwayland-23.1.0[libei] )
 "
 DEPEND="${COMMON_DEPEND}
-	>=dev-libs/plasma-wayland-protocols-1.21.0
-	>=dev-libs/wayland-protocols-1.48
+	>=dev-libs/plasma-wayland-protocols-1.23.0
+	>=dev-libs/wayland-protocols-1.49
 	>=dev-qt/qtbase-${QTMIN}:6[concurrent]
 	dev-util/vulkan-headers
 	test? ( screencast? ( >=kde-plasma/kpipewire-${KDE_CATV}:6 ) )
 	X? ( x11-base/xorg-proto )
 "
-BDEPEND="
-	${PYTHON_DEPS}
+BDEPEND="${PYTHON_DEPS}
 	>=dev-qt/qtbase-${QTMIN}:6[wayland]
 	dev-util/wayland-scanner
 	>=kde-frameworks/kcmutils-${KFMIN}:6
+	virtual/pkgconfig
 "
 
 case ${PV} in
@@ -126,7 +126,9 @@ esac
 FILECAPS=( -m 0755 cap_sys_nice=ep usr/bin/kwin_wayland )
 
 PATCHES=(
-	"${WORKDIR}/${PATCHSET}" # in 6.7.6; KDE-bugs #510116, #525349, #525590
+	"${WORKDIR}/${PATCHSET}" # in 6.8.3
+	"${FILESDIR}/${PN}-6.7.6-persistent-cli-no_options.patch" # in 6.8.3; bug #985093
+	"${FILESDIR}/${P}-optional-setcap.patch" # pending; bug #984516
 	# ::snakebyte: touch edge rejection (KWin branch touchscreen-edge-rejection,
 	# not upstream); drop once upstream has it
 	"${FILESDIR}/${P}-touch-edge-rejection.patch"
@@ -163,7 +165,9 @@ src_configure() {
 	local mycmakeargs=(
 		# KWIN_BUILD_DECORATIONS exists, drops aurorae, breeze
 		# KWIN_BUILD_NOTIFICATIONS exists, but kdeclarative still hard-depends on it
+		-DKWIN_BUILD_SET_CAP_SYS_NICE=OFF # see fcaps.eclass, FILECAPS
 		$(cmake_use_find_package accessibility QAccessibilityClient6)
+		$(cmake_use_find_package activities PlasmaActivities)
 		-DKWIN_BUILD_SCREENLOCKER=$(usex lock)
 		-DKWIN_BUILD_GLOBALSHORTCUTS=$(usex shortcuts)
 		-DKWIN_BUILD_X11=$(usex X)

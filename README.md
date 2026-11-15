@@ -118,11 +118,19 @@ G-code generator and control software for laser cutters and engravers. Most of
 the `dev-python/*` packages in this overlay are its dependencies, including
 the Rust-based `raygeo`, `raydriver` and `vtracer`.
 
+Bump the dependencies to the versions pinned in rayforge's `requirements.txt`
+for that release (e.g. rayforge 1.14.0 pins `raygeo==1.76.0`, not the newest
+raygeo), and regenerate the `CRATES`/licenses of the Rust packages with
+`pycargoebuild`.
+
 `dev-python/mupdf` builds against the system MuPDF and requires exactly the
 same version (`~app-text/mupdf-${PV}`). Always update `app-text/mupdf`,
 `dev-python/mupdf` and `dev-python/PyMuPDF` together, and pin `app-text/mupdf`
 to that version in `package.accept_keywords` (e.g.
 `=app-text/mupdf-1.28.2* ~amd64`).
+PyMuPDF itself may be newer than MuPDF as long as it builds against it
+(PyMuPDF 2.1 needs MuPDF >= 1.28; its fixes that depend on MuPDF 1.28.5+
+only arrive once `::gentoo` bumps `app-text/mupdf`).
 
 ### Stremio — `media-video/stremio`
 
@@ -157,12 +165,13 @@ bash /var/db/repos/snakebyte/app-misc/claude-desktop-bin/files/claude-desktop-bu
 ### Claude Code — `dev-util/claude-code`
 
 The `::gentoo` ebuild, bumped here to the current release on Claude Code's
-*stable* channel. Its `managed-settings.json` turns off the self-updater and
+*latest* channel (the bump script takes `stable` or `latest`, default
+`stable`). Its `managed-settings.json` turns off the self-updater and
 the installation checks, so Claude Code never installs copies into the home
 directory. Drop this copy again once `::gentoo` catches up.
 
 ```sh
-bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump
+bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump [stable|latest]
 ```
 
 ### OpenCode — `dev-util/opencode-bin`
@@ -171,7 +180,7 @@ OpenCode, the open source coding agent for the terminal (CLI, TUI and web
 interface): <https://opencode.ai>. Copy of the `::guru` ebuild, bumped to the
 current release so this overlay stays self-contained; the prebuilt binary
 comes from upstream's npm packages (`@opencode/cli-linux-*`, MIT).
-Installed and tested on amd64 (2.0.26, 2026-10-10).
+Installed and tested on amd64 (2.3.0, 2026-11-14).
 
 ### Wispr Flow — `app-accessibility/wispr-flow-bin`
 
@@ -179,12 +188,16 @@ Voice dictation for office work. Wispr Flow has no official Linux build; this
 package uses the unofficial
 [wispr-flow-linux](https://github.com/wispr-flow-linux/wispr-flow-linux) port
 (the proprietary app repackaged with a Linux Electron runtime). The port's
-Linux helper (text injection, push-to-talk) is **built from source** here,
-with a fix for [#123](https://github.com/wispr-flow-linux/wispr-flow-linux/issues/123):
-the prebuilt helper re-presses modifiers that are physically held during a
-paste on its own virtual keyboard and never releases them, so Ctrl/Alt stay
-logically pressed on Wayland. A udev rule gives the active session access to
-`/dev/uinput` and `/dev/input`. Run `wispr-flow --doctor` to check the setup.
+Linux helper (text injection, push-to-talk) is **built from source** here;
+since helper 0.1.3 it includes the fix for
+[#123](https://github.com/wispr-flow-linux/wispr-flow-linux/issues/123)
+(held Ctrl/Alt stayed logically pressed after a paste), which this overlay
+carried as a patch before. The bundled Electron 42 is replaced by Electron 44
+and the native SQLite modules are rebuilt for it: Chromium before 151 clamps
+a fractional Wayland scale below 1 (e.g. KDE at 75%) to 1, so clicks miss the
+controls ([#130](https://github.com/wispr-flow-linux/wispr-flow-linux/issues/130)).
+A udev rule gives the active session access to `/dev/uinput` and
+`/dev/input`. Run `wispr-flow --doctor` to check the setup.
 
 ### wkhtmltopdf for Odoo — `media-gfx/wkhtmltopdf-odoo-bin`
 
@@ -254,9 +267,9 @@ The phone sends its GPS position; the plugin
   client or a D-Bus caller) and tells it to stop afterwards.
 
 The NMEA output is off by default. These patches are not part of KDE Connect;
-this copy (revision `-r101`, so it wins over `::gentoo`) is dropped again if
+this copy (revision `-r100`, so it wins over `::gentoo`) is dropped again if
 KDE Connect itself gains these features. When `::gentoo` bumps KDE Connect, the
-patches are rebased and a new `-r101` is added here.
+patches are rebased and a new `-r100` is added here.
 
 The phone needs a KDE Connect build that includes MR !529 (the release on
 Google Play/F-Droid does not yet), and the plugin must be enabled for the
@@ -275,21 +288,30 @@ when a connection drops, and then again while a paired device is unreachable
 (after one minute, backing off to every 15 minutes), so the phone reconnects
 over the VPN by itself after it left the home Wi-Fi. A connection that stops
 acknowledging data is dropped after 60 s instead of hanging for many minutes.
-Also included: the upstream TCP keepalive tuning from master (not in 26.04).
+Also included: upstream 51dfea90b from master (TCP keepalive on macOS; the
+Linux keepalive tuning 31c755d22 is part of 26.08 itself).
 
 ### Adobe Creative Cloud apps — `app-emulation/adobewine` and `app-emulation/wine-adobe`
 
-Photoshop, Illustrator, Premiere Pro, Audition and Media Encoder under Wine,
-packaged from [AdobeWine](https://github.com/le-birnes/AdobeWine):
+Photoshop, Illustrator, Premiere Pro, Audition, Media Encoder and more under
+Wine, packaged from [LinDobe](https://github.com/le-birnes/LinDobe) (called
+AdobeWine until 0.5.4; the command and paths are still `adobewine`):
 
-- **`wine-adobe`** (11.18) — Wine with the AdobeWine patch set, installed next
-  to other Wine versions in `/usr/lib/wine-adobe-11.18`.
-- **`adobewine`** (0.2.2) — the `adobewine` command. It creates a per-user
+- **`wine-adobe`** (11.20) — Wine with the LinDobe 0.6.1 patch set, installed
+  next to other Wine versions in `/usr/lib/wine-adobe-11.20`. One local patch
+  on top draws layered child windows over `UpdateLayeredWindow` windows
+  (Photoshop's contextual task bar); fully opaque ones are left to LinDobe's
+  own patch 0142.
+- **`adobewine`** (0.6.1) — the `adobewine` command. It creates a per-user
   prefix in `~/.local/share/adobewine/prefix` (DXVK, vkd3d-proton behind
-  AdobeWine's D3D12 shim, fonts, registry settings), starts the apps and adds
+  LinDobe's D3D12 shim, fonts, registry settings), starts the apps and adds
   them to the menu. DXVK, vkd3d-proton, nvidia-libs, wine-gecko and wine-mono
   come from Portage; nothing is downloaded at run time except what winetricks
-  fetches.
+  and the core-font step fetch. Upstream's patched GPU builds
+  (`scripts/build-gpu-deps.sh`: DXVK for Premiere on Intel and Lightroom's
+  videos, vkd3d-proton/nvcuda for After Effects' viewers) are not built here.
+  The GTK 4 hub window (`/opt/adobewine/hub/adobewine-hub`) is installed but
+  needs `gui-libs/libadwaita` and `dev-python/pygobject`.
 
 ```sh
 adobewine setup [--windows-fonts <Fonts folder of your own Windows>]
@@ -298,8 +320,8 @@ adobewine launchers                            # menu entries
 adobewine photoshop
 ```
 
-AdobeWine 0.2.x carries the fixes this overlay used to apply on top of 0.1.0
-itself — they are upstream as pull requests 3–7:
+Since AdobeWine 0.2.x upstream carries the fixes this overlay used to apply
+on top of 0.1.0 itself (pull requests 3–7):
 
 - **Segoe UI from Selawik** (`media-fonts/selawik`) when no Windows fonts are
   given. Without a real "Segoe UI" family Photoshop's menu bar stays white and
@@ -318,7 +340,7 @@ itself — they are upstream as pull requests 3–7:
 Still local to this overlay: the runtime is Portage's
 `app-emulation/wine-adobe` instead of a self-built one, DXVK/vkd3d-proton/
 nvidia-libs are installed at emerge time instead of fetched at first setup,
-and prefixes made by `adobewine-0.1.0-r1` lose the Selawik GDI FontSubstitutes
+wine-gecko/wine-mono come from Portage instead of `~/.cache/wine`, and prefixes made by `adobewine-0.1.0-r1` lose the Selawik GDI FontSubstitutes
 that version wrote (with a real Segoe UI they steer GDI away from it).
 
 After upgrading, run `adobewine setup` once more so an existing prefix gets the
@@ -335,7 +357,7 @@ charger's noise. The screen only reports positions (no pressure or contact
 size), so its sensitivity cannot be tuned, but edge ghosts can be recognised:
 they start very close to an edge and do not move.
 
-These packages are the `::gentoo` 6.7.5 ebuilds with one patch each:
+These packages are the `::gentoo` 6.8.2 ebuilds with one patch each:
 
 - **KWin**: a touch that starts closer than a per-device width to an edge of
   the touch screen is held back; it is delivered (with its original start) as
@@ -349,7 +371,7 @@ These packages are the `::gentoo` 6.7.5 ebuilds with one patch each:
 Install both together (plasma-desktop needs the patched KWin at build time),
 then log out and in again. Not part of KDE; dropped again if KWin gains this
 itself. Back to `::gentoo`:
-`emerge --oneshot =kde-plasma/kwin-6.7.5-r1 =kde-plasma/plasma-desktop-6.7.5`.
+`emerge --oneshot =kde-plasma/kwin-6.8.2-r2 =kde-plasma/plasma-desktop-6.8.2`.
 
 ### The storytold Crafting Apps — `*craft-bin`
 
@@ -424,11 +446,11 @@ device, e.g. `usermod -aG dialout <user>`.
 
 | Package | Version | Description | License | Notes |
 |---|---|---|---|---|
-| `app-emulation/adobewine` | 0.2.2 | AdobeWine: prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts (PR 3–7 merged in 0.2.x); DXVK 3.1.1, vkd3d-proton 3.0.1, nvidia-libs 1.0.2 |
-| `app-emulation/wine-adobe` | 11.18 | Wine with the AdobeWine patch set | LGPL-2.1+ | slotted; adobewine needs it with USE `gecko mono vulkan wow64` |
-| `app-misc/claude-desktop-bin` | 2.9939.4-r1 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
+| `app-emulation/adobewine` | 0.6.1 | LinDobe (formerly AdobeWine): prefix setup and launcher for Adobe Creative Cloud apps | LGPL-2.1+, ZLIB, MIT | upstream scripts (PR 3–7 merged in 0.2.x); stock DXVK 3.1.1, vkd3d-proton 3.0.1, nvidia-libs 1.0.2 (upstream's patched GPU builds are not built) |
+| `app-emulation/wine-adobe` | 11.20 | Wine with the LinDobe patch set (0.6.1) | LGPL-2.1+ | slotted; adobewine needs it with USE `gecko mono vulkan wow64`; plus a local layered-child-window patch |
+| `app-misc/claude-desktop-bin` | 5.11492.5 | Claude Desktop (official Linux build) | all-rights-reserved | USE=cowork pulls in QEMU |
 | `app-misc/garmin-express-bin` | 7.13.1.0 | Garmin Express (device updates and sync), Windows build via Wine | all-rights-reserved | pinned to 7.13 (newer versions can't see devices under Wine); Edge 530 tested with wine-vanilla-11.0 |
-| `app-accessibility/wispr-flow-bin` | 1.6.957 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper built from source with a stuck-modifier fix |
+| `app-accessibility/wispr-flow-bin` | 1.6.1337 | Wispr Flow voice dictation (unofficial Linux port) | all-rights-reserved, Unlicense | helper 0.1.4 built from source; Electron 44 instead of the bundled 42 |
 | `app-office/deckcraft` | 0.11.1 | DeckCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks deckcraft-bin; USE=cjk, pipewire |
 | `app-office/deckcraft-bin` | 0.18.1 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `app-office/gridcraft` | 0.12.1 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
@@ -437,41 +459,41 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-office/wordcraft-bin` | 0.18.1 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `app-text/pdfcraft` | 0.14.0 | PdfCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks pdfcraft-bin; USE=mcp |
 | `app-text/pdfcraft-bin` | 0.21.1 | PdfCraft PDF reader and editor (Rust, wgpu); renamed from PrintCraft | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
-| `dev-util/claude-code` | 2.1.287 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (stable channel); `::gentoo` carries a newer version, so drop this package once it does again |
-| `dev-util/opencode-bin` | 2.0.26 | OpenCode coding agent (CLI/TUI/web), prebuilt Linux binary | MIT | copy from `::guru`; bumped to the current release |
-| `dev-lang/bun-bin` | 1.4.3 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
+| `dev-util/claude-code` | 2.1.325 | Claude Code CLI | all-rights-reserved | bump of the `::gentoo` ebuild (latest channel); drop this package once `::gentoo` catches up |
+| `dev-util/opencode-bin` | 2.3.0 | OpenCode coding agent (CLI/TUI/web), prebuilt Linux binary | MIT | copy from `::guru`; bumped to the current release |
+| `dev-lang/bun-bin` | 1.4.4 | Bun JavaScript runtime | MIT | copy from `::guru`; used by Claude Code channel plugins |
 | `dev-libs/libpresage` | 0.9.1 | Intelligent predictive text entry | GPL-3 | |
-| `dev-python/PyMuPDF` | 1.28.2 | Python library for PDF manipulation | AGPL-3 | rayforge dependency |
-| `dev-python/anthropic` | 0.116.0 | Claude API client library | MIT | copy from `::guru` |
+| `dev-python/PyMuPDF` | 2.1 | Python library for PDF manipulation | AGPL-3 | rayforge dependency; builds the classic `pymupdf-lite` (no layout/4llm) against the system MuPDF 1.28.2 (upstream targets 1.28.6) |
+| `dev-python/anthropic` | 2.8.0 | Claude API client library | MIT BSD | based on the `::guru` 0.116.0 ebuild; 2.x is built on `httpx2` and vendors `httpx_aiohttp`; the mock-server spec ships in the tarball (`STAINLESS_SPEC_FILE`) |
 | `dev-python/asyncudp` | 0.11.0 | High-level asyncio UDP sockets | MIT | rayforge dependency |
-| `dev-python/ezdxf` | 1.4.4 | Create and modify DXF drawings | MIT | copy from `::guru`; rayforge dependency |
+| `dev-python/ezdxf` | 1.4.5 | Create and modify DXF drawings | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/http-snapshot` | 0.1.9 | HTTP snapshot testing | MIT | copy from `::guru`; anthropic test dependency |
-| `dev-python/httpx-aiohttp` | 0.2.0 | aiohttp transport for httpx | BSD | copy from `::guru`; anthropic test dependency |
-| `dev-python/jiter` | 0.17.0 | Fast iterable JSON parser (Rust) | MIT | anthropic dependency; crate tarball on this overlay's `distfiles` release (upstream `fasys-crate-dist` has no 0.17.0) |
+| `dev-python/httpx-aiohttp` | 0.2.0 | aiohttp transport for httpx | BSD | copy from `::guru`; no longer used by anthropic >= 1.0 (vendored there) |
+| `dev-python/jiter` | 0.19.0 | Fast iterable JSON parser (Rust) | MIT | anthropic dependency; `CRATES` generated with `pycargoebuild` (fetched from crates.io) |
 | `dev-python/mupdf` | 1.28.2 | Python bindings for MuPDF | AGPL-3 | PyMuPDF dependency; needs the same `app-text/mupdf` version |
 | `dev-python/pipcl` | 13 | Build helper for MuPDF/PyMuPDF | AGPL-3 | PyMuPDF dependency |
-| `dev-python/playwright` | 1.63.0 | Browser automation (bundled node driver) | Apache-2.0 | browsers live in `~/.cache/ms-playwright` |
+| `dev-python/playwright` | 1.65.2 | Browser automation (bundled node driver) | Apache-2.0 | browsers live in `~/.cache/ms-playwright`; no longer needs pyee since 1.65 |
 | `dev-python/py-slvs` | 1.0.6 | Python binding for the SolveSpace constraint solver | GPL-3 | |
 | `dev-python/pymupdf-fonts` | 1.0.5 | Optional fonts for PyMuPDF | OFL-1.1 | PyMuPDF dependency |
-| `dev-python/pyee` | 13.0.1 | Port of node's EventEmitter | MIT | playwright dependency (needs <14) |
+| `dev-python/pyee` | 16.0.2 | Port of node's EventEmitter | MIT | was a playwright dependency up to 1.64 |
 | `dev-python/pytest-base-url` | 2.1.0 | pytest plugin for base URLs | MPL-2.0 | pytest-playwright dependency |
 | `dev-python/pytest-playwright` | 0.10.0 | pytest plugin for Playwright | Apache-2.0 | |
 | `dev-python/pyvips` | 3.2.0 | Python binding for libvips | MIT | rayforge dependency |
-| `dev-python/raydriver` | 0.3.0 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
-| `dev-python/raygeo` | 1.62.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
-| `dev-python/ruida-pa` | 0.22.0 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
+| `dev-python/raydriver` | 1.3.2 | Machine drivers for rayforge (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/raygeo` | 1.76.0 | 2D/3D geometry for CAD/CAM (Rust + Python) | MIT | rayforge dependency |
+| `dev-python/ruida-pa` | 0.24.0 | Ruida protocol analyzer and driver | MIT | rayforge dependency; bokeh/textual optional |
 | `dev-python/standardwebhooks` | 1.1.0 | Standard Webhooks reference library | MIT | anthropic test dependency; hatchling backend since 1.1.0 |
 | `dev-python/svgelements` | 1.9.6-r1 | SVG parser | MIT | copy from `::guru`; rayforge dependency |
 | `dev-python/vtracer` | 0.6.15 | Raster to vector tracing (Rust + Python) | MIT | rayforge dependency |
-| `kde-misc/kdeconnect` | 26.04.3-r101 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
+| `kde-misc/kdeconnect` | 26.08.3-r100 | KDE Connect with the geolocation plugin (phone location as NMEA on localhost and on D-Bus) and remote connect (custom devices by host name, retry with backoff, dead-link timeout, settings UI) | GPL-2+ | `::gentoo` ebuild + patches; geolocation needs kdeconnect-android MR !529 on the phone; dropped once upstream merges |
 | `media-fonts/selawik` | 1.01 | Microsoft's open, metric-compatible fallback for Segoe UI | OFL-1.1 | used by adobewine when no Windows fonts are given |
-| `media-gfx/bambu-suite-bin` | 01.05.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
+| `media-gfx/bambu-suite-bin` | 01.06.00.00 | Bambu Suite (H2D/H2C laser and cutter), Windows build via Wine | all-rights-reserved | |
 | `media-gfx/cadcraft` | 0.13.0 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
 | `media-gfx/cadcraft-bin` | 0.20.1 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
 | `media-gfx/designcraft` | 0.13.0 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
 | `media-gfx/designcraft-bin` | 0.20.1 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
-| `media-gfx/lightburn-wine` | 2.1.04 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support |
+| `media-gfx/lightburn-wine` | 2.2.01 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support; 2.1.04 kept as fallback for licenses whose update period ends before 2.2 |
 | `media-gfx/lightcraft` | 0.14.0 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
 | `media-gfx/lightcraft-bin` | 0.21.1 | LightCraft photo library and raw developer (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; first start creates `~/Pictures/LightCraft Library`; early alpha |
 | `media-gfx/photocraft` | 9999 | PhotoCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences), OFL-1.1 with USE=cjk | blocks photocraft-bin; USE=cjk (default) embeds craft-fonts like the releases, USE=avif adds AVIF export |
@@ -480,8 +502,8 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/vectorcraft` | 0.17.0 | VectorCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks vectorcraft-bin; USE=cjk |
 | `media-gfx/vectorcraft-bin` | 0.24.1 | VectorCraft vector illustration editor, SVG and PDF (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `media-gfx/wkhtmltopdf-odoo-bin` | 0.12.6.1_p3 | wkhtmltopdf with patched Qt, for Odoo PDF reports | LGPL-3+ | |
-| `media-gfx/rayforge` | 1.12.0 | G-code generator and laser control | MIT | |
-| `media-sound/noson-app` | 5.7.6 | SONOS controller (Qt 6) | GPL-3 | newer than `::guru` |
+| `media-gfx/rayforge` | 1.14.0 | G-code generator and laser control | MIT | |
+| `media-sound/noson-app` | 5.7.8 | SONOS controller (Qt 6) | GPL-3 | newer than `::guru` |
 | `media-sound/soundcraft-bin` | 0.20.1 | SoundCraft digital audio workstation (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `media-video/effectcraft` | 0.17.0 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
 | `media-video/effectcraft-bin` | 0.24.1 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
@@ -490,12 +512,14 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-video/stremio` | 1.2.2 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
 | `sci-geosciences/map-update` | 1.2 | Keep offline maps (Garmin .img) up to date in QMapShack and on Garmin devices | GPL-2 | Python script + systemd user timer |
 | `sci-geosciences/qmapshack` | 1.21.1-r101 | QMapShack with surface and way-type analysis of tracks (surface database from OSM extracts, `qms_surfacedb`) and Mapsforge POI v3/v4 | GPL-3+ | `::gentoo` ebuild + 4 patches; test fixture in `files/`; dropped once upstream has it |
-| `kde-plasma/kwin` | 6.7.5-r101 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |
-| `kde-plasma/plasma-desktop` | 6.7.5-r101 | Plasma desktop with the edge rejection setting in the Touchscreen KCM | GPL-2+ | `::gentoo` ebuild + patch; needs kwin-6.7.5-r101 |
+| `kde-plasma/kwin` | 6.8.2-r100 | KWin with touch screen edge rejection | GPL-2+ | `::gentoo` ebuild + patch; install with plasma-desktop |
+| `kde-plasma/plasma-desktop` | 6.8.2-r100 | Plasma desktop with the edge rejection setting in the Touchscreen KCM | GPL-2+ | `::gentoo` ebuild + patch; needs kwin-6.8.2-r100 |
 | `net-vpn/tailscale-lan-route` | 1.0 | Prefer directly connected networks over Tailscale subnet routes | GPL-2 | fixes LAN traffic going through a subnet router; [docs](docs/tailscale-lan-route.md) |
 
 All ebuilds use EAPI 8. `eclass/stainless-python.eclass` is a copy from
-`::guru`, needed by `dev-python/anthropic`.
+`::guru`, needed by `dev-python/anthropic`, plus one local addition:
+`STAINLESS_SPEC_FILE` points the mock server at a spec bundled in the sources
+(anthropic >= 2 no longer publishes it on storage.googleapis.com).
 
 ## Workflow
 

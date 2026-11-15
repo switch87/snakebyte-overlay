@@ -1,5 +1,5 @@
 KDE Connect over a VPN (branch remote-connect, upstream MR pending),
-backported to kdeconnect-kde 26.04.3:
+forward-ported to kdeconnect-kde 26.08.3:
 - custom devices may be IPv4 addresses or host names (e.g. Tailscale
   MagicDNS), resolved on every send; invalid entries are rejected when the
   list is set;
@@ -10,8 +10,10 @@ backported to kdeconnect-kde 26.04.3:
 - settings section "Devices by Address" in the KDE Connect app;
 - no mDNS in LanLinkProvider's test mode (for its tests).
 
-Generated with: git diff <last geolocation commit> stable-26.04.3.
-Applies with -p1 after kdeconnect-26.04.3-geolocation-plugin.patch.
+Generated with: git diff <geolocation commit> stable-26.08.3 in
+~/Workspace/src/kdeconnect-kde-26.08.3 (one conflict against 26.04.3: the
+mDNS choice in LanLinkProvider's constructor is logged with qCDebug in 26.08).
+Applies with -p1 after kdeconnect-26.08.3-geolocation-plugin.patch.
 
 diff --git a/app/qml/Settings.qml b/app/qml/Settings.qml
 index 8823008e9..e0bc4169a 100644
@@ -570,7 +572,7 @@ index 000000000..37cf60586
 +KDECONNECTCORE_EXPORT QStringList sanitized(QStringList entries);
 +}
 diff --git a/core/backends/lan/lanlinkprovider.cpp b/core/backends/lan/lanlinkprovider.cpp
-index ecf852108..23deab3d8 100644
+index e982f41ad..4e8f7bce2 100644
 --- a/core/backends/lan/lanlinkprovider.cpp
 +++ b/core/backends/lan/lanlinkprovider.cpp
 @@ -7,6 +7,7 @@
@@ -620,12 +622,12 @@ index ecf852108..23deab3d8 100644
 -    m_mdnsDiscovery = new MdnshDiscovery(this);
 -#else
 -    if (AvahiDiscovery::hasAvahiDaemonRunning()) {
--        qCInfo(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
+-        qCDebug(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
 -        m_mdnsDiscovery = new AvahiDiscovery(this);
 +    if (m_testMode) {
 +        m_mdnsDiscovery = new NoMdnsDiscovery;
      } else {
--        qCInfo(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
+-        qCDebug(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
 +#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
 +        // TODO: Both Windows and macOS have system APIs for mDNS that we could use.
 +        //       Windows docs: https://learn.microsoft.com/en-us/uwp/api/windows.networking.servicediscovery.dnssd
@@ -633,10 +635,10 @@ index ecf852108..23deab3d8 100644
 -    }
 +#else
 +        if (AvahiDiscovery::hasAvahiDaemonRunning()) {
-+            qCInfo(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
++            qCDebug(KDECONNECT_CORE) << "Using Avahi for mDNS discovery";
 +            m_mdnsDiscovery = new AvahiDiscovery(this);
 +        } else {
-+            qCInfo(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
++            qCDebug(KDECONNECT_CORE) << "Using mdnsh for mDNS discovery";
 +            m_mdnsDiscovery = new MdnshDiscovery(this);
 +        }
  #endif
@@ -653,7 +655,7 @@ index ecf852108..23deab3d8 100644
 +
      m_udpSocket.setProxy(QNetworkProxy::NoProxy);
  
-     connect(&m_udpSocket, &QAbstractSocket::errorOccurred, [](QAbstractSocket::SocketError socketError) {
+     connect(&m_udpSocket, &QAbstractSocket::errorOccurred, this, [](QAbstractSocket::SocketError socketError) {
 @@ -161,6 +190,8 @@ void LanLinkProvider::onStop()
      m_mdnsDiscovery->onStop();
      m_udpSocket.close();
@@ -721,7 +723,7 @@ index ecf852108..23deab3d8 100644
  void LanLinkProvider::sendUdpIdentityPacket(const QList<QHostAddress> &addresses)
  {
      // Broadcast from every local IP address to reach all networks
-@@ -584,6 +628,8 @@ void LanLinkProvider::onLinkDestroyed(const QString &deviceId, DeviceLink *oldPt
+@@ -585,6 +629,8 @@ void LanLinkProvider::onLinkDestroyed(const QString &deviceId, DeviceLink *oldPt
      qCDebug(KDECONNECT_CORE) << "LanLinkProvider deviceLinkDestroyed" << deviceId;
      DeviceLink *link = m_links.take(deviceId);
      Q_ASSERT(link == oldPtr);
@@ -730,7 +732,7 @@ index ecf852108..23deab3d8 100644
  }
  
  void LanLinkProvider::configureSslSocket(QSslSocket *socket, const QString &deviceId, bool isDeviceTrusted)
-@@ -635,6 +681,15 @@ void LanLinkProvider::configureSocket(QSslSocket *socket)
+@@ -636,6 +682,15 @@ void LanLinkProvider::configureSocket(QSslSocket *socket)
  #endif
          setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
          setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
@@ -746,8 +748,8 @@ index ecf852108..23deab3d8 100644
      }
  #endif
  }
-@@ -676,6 +731,8 @@ void LanLinkProvider::addLink(QSslSocket *socket, const DeviceInfo &deviceInfo)
-         }
+@@ -677,6 +732,8 @@ void LanLinkProvider::addLink(QSslSocket *socket, const DeviceInfo &deviceInfo)
+         disconnect(socket, &QAbstractSocket::disconnected, socket, &QObject::deleteLater);
          m_links[deviceInfo.id] = deviceLink;
      }
 +    // A device connected: the retries for the others start over at the first interval
@@ -756,7 +758,7 @@ index ecf852108..23deab3d8 100644
  }
  
 diff --git a/core/backends/lan/lanlinkprovider.h b/core/backends/lan/lanlinkprovider.h
-index 584ee438e..15410a5d7 100644
+index d42117033..3aff7138c 100644
 --- a/core/backends/lan/lanlinkprovider.h
 +++ b/core/backends/lan/lanlinkprovider.h
 @@ -17,6 +17,8 @@
@@ -788,10 +790,10 @@ index 584ee438e..15410a5d7 100644
  
  #endif
 diff --git a/core/daemon.cpp b/core/daemon.cpp
-index 2f0dda8e6..564275a90 100644
+index 2ff05bd12..de2530f55 100644
 --- a/core/daemon.cpp
 +++ b/core/daemon.cpp
-@@ -24,6 +24,7 @@
+@@ -23,6 +23,7 @@
  #endif
  
  #include "backends/devicelink.h"
@@ -799,7 +801,7 @@ index 2f0dda8e6..564275a90 100644
  #include "backends/lan/lanlinkprovider.h"
  #include "backends/linkprovider.h"
  #include "backends/loopback/loopbacklinkprovider.h"
-@@ -47,6 +48,11 @@ Daemon *Daemon::instance()
+@@ -46,6 +47,11 @@ Daemon *Daemon::instance()
      return s_instance;
  }
  
@@ -811,7 +813,7 @@ index 2f0dda8e6..564275a90 100644
  Daemon::Daemon(QObject *parent, bool testMode)
      : QObject(parent)
      , d(new DaemonPrivate)
-@@ -77,6 +83,14 @@ void Daemon::init()
+@@ -76,6 +82,14 @@ void Daemon::init()
      auto configInstance = KdeConnectConfig::instance();
      const auto disabledLinkProviders = configInstance.disabledLinkProviders();
  
@@ -826,7 +828,7 @@ index 2f0dda8e6..564275a90 100644
      qCDebug(KDECONNECT_CORE) << "Constructing Backends";
      // Load backends
      if (d->m_testMode) {
-@@ -284,9 +298,10 @@ void Daemon::setAnnouncedName(const QString &name)
+@@ -283,9 +297,10 @@ void Daemon::setAnnouncedName(const QString &name)
      Q_EMIT announcedNameChanged(filteredName);
  }
  
@@ -839,7 +841,7 @@ index 2f0dda8e6..564275a90 100644
      auto customDevices = config.customDevices();
      if (customDevices != addresses) {
 diff --git a/core/daemon.h b/core/daemon.h
-index 498c797f5..cbd506152 100644
+index 6864bf711..d2b067d59 100644
 --- a/core/daemon.h
 +++ b/core/daemon.h
 @@ -32,6 +32,8 @@ public:

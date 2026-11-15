@@ -5,24 +5,21 @@ EAPI=8
 
 ECM_HANDBOOK="optional"
 ECM_TEST="true"
-KFMIN=6.26.0
+KFMIN=6.30.0
 QTMIN=6.11.2
 inherit ecm plasma.kde.org optfeature xdg
 
 DESCRIPTION="KDE Plasma desktop"
-XORGHDRS="${PN}-override-include-dirs-5"
-SRC_URI+=" https://dev.gentoo.org/~asturm/distfiles/${XORGHDRS}.tar.xz"
 
 LICENSE="GPL-2" # TODO: CHECK
 SLOT="6"
-KEYWORDS="amd64 arm64 ~ppc64 ~riscv ~x86"
+KEYWORDS="~amd64 ~arm64"
 IUSE="ibus input_devices_wacom scim screencast sdl +semantic-desktop webengine"
 
 RESTRICT="test" # missing selenium-webdriver-at-spi
 
 # slot op: Uses Qt6::GuiPrivate for qtx11extras_p.h
 # kde-frameworks/kwindowsystem[X]: Uses KX11Extras
-# kde-plasma/plasma-workspace[X]: applets/pager/pagermodel.cpp includes xwindowtasksmodel.h
 COMMON_DEPEND="
 	>=dev-qt/qt5compat-${QTMIN}:6[qml]
 	>=dev-qt/qtbase-${QTMIN}:6=[concurrent,dbus,gui,network,sql,wayland,widgets,xml,X]
@@ -63,18 +60,16 @@ COMMON_DEPEND="
 	>=kde-frameworks/kxmlgui-${KFMIN}:6
 	>=kde-frameworks/solid-${KFMIN}:6
 	>=kde-frameworks/sonnet-${KFMIN}:6
-	>=kde-plasma/kwin-6.7.5-r101:6
+	>=kde-plasma/kwin-6.8.2-r100:6
 	>=kde-plasma/libksysguard-${KDE_CATV}:6
 	>=kde-plasma/libplasma-${KDE_CATV}:6=
 	>=kde-plasma/plasma-activities-${KDE_CATV}:6=
 	>=kde-plasma/plasma-activities-stats-${KDE_CATV}:6
-	>=kde-plasma/plasma-workspace-${KDE_CATV}:6[screencast?,X(-)]
+	>=kde-plasma/plasma-workspace-${KDE_CATV}:6[screencast?]
 	>=kde-plasma/plasma5support-${KDE_CATV}:6
 	virtual/libudev:=
 	x11-libs/libX11
 	x11-libs/libxcb
-	x11-libs/libXcursor
-	x11-libs/libXi
 	x11-libs/libxkbcommon
 	x11-libs/libxkbfile
 	ibus? (
@@ -105,7 +100,6 @@ DEPEND="${COMMON_DEPEND}
 	)
 "
 RDEPEND="${COMMON_DEPEND}
-	!<kde-plasma/plasma-workspace-6.0.80
 	dev-libs/kirigami-addons:6
 	>=kde-frameworks/kirigami-${KFMIN}:6
 	>=kde-plasma/kwin-${KDE_CATV}:6[X(-)]
@@ -125,7 +119,6 @@ BDEPEND="
 "
 
 PATCHES=(
-	"${WORKDIR}/${XORGHDRS}/${PN}-6.1.80-override-include-dirs.patch" # downstream patch
 	# ::snakebyte: touch edge rejection setting in the Touchscreen KCM (branch
 	# touchscreen-edge-rejection, not upstream); drop once upstream has it
 	"${FILESDIR}/${P}-touch-edge-rejection.patch"
@@ -147,10 +140,6 @@ src_prepare() {
 
 src_configure() {
 	local mycmakeargs=(
-		-DBUILD_KCM_MOUSE_X11=ON
-		-DBUILD_KCM_TOUCHPAD_X11=ON
-		-DXORGLIBINPUT_INCLUDE_DIRS="${WORKDIR}/${XORGHDRS}"/include
-		-DXORGSERVER_INCLUDE_DIRS="${WORKDIR}/${XORGHDRS}"/include
 		-DCMAKE_DISABLE_FIND_PACKAGE_PackageKitQt6=ON # not packaged
 		$(cmake_use_find_package ibus GLIB2)
 		-DBUILD_KCM_TABLET=$(usex input_devices_wacom)
