@@ -27,7 +27,7 @@ RESTRICT="strip"
 
 RDEPEND="
 	>=dev-python/greenlet-3.1.1[${PYTHON_USEDEP}]
-	=dev-python/pyee-13*[${PYTHON_USEDEP}]
+	<dev-python/greenlet-4[${PYTHON_USEDEP}]
 "
 
 QA_PREBUILT="usr/lib/python3*/site-packages/playwright/driver/*"

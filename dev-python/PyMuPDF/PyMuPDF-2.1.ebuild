@@ -77,8 +77,8 @@ python_compile() {
 	# Use the system dev-python/mupdf for headers/libs; don't let
 	# upstream setup.py rebuild MuPDF from a downloaded copy.
 	local _i=( $($(tc-getPKG_CONFIG) mupdf --cflags-only-I) )
-	PYMUPDF_SETUP_FLAVOUR='p' \
 	PYMUPDF_SETUP_MUPDF_BUILD= \
+	PYMUPDF_SETUP_REQUIRE_LAYOUT_4LLM=0 \
 	PYMUPDF_SETUP_MUPDF_THIRD=0 \
 	PYMUPDF_SETUP_MUPDF_REBUILD=0 \
 	PYMUPDF_INCLUDES="$(printf '%s:' ${_i[@]//-I})${EPREFIX}/usr/include" \

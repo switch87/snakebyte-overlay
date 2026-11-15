@@ -6,11 +6,12 @@ EAPI=8
 DISTUTILS_USE_PEP517=hatchling
 PYTHON_COMPAT=( python3_{12..14} )
 
-# See https://github.com/anthropics/anthropic-sdk-python/blob/main/.stats.yml
-STAINLESS_SPEC_PATH=${PN}/${PN}-506a5ad71d522b4ae56ac3429380486647af1f92eddde80603480fb592d62b54.yml
+# Since 2.x the OpenAPI spec for the mock server ships in the tarball
+# (scripts/mock-spec.json.gz) instead of on storage.googleapis.com.
+STAINLESS_SPEC_FILE=scripts/mock-spec.json.gz
 # See https://github.com/anthropics/anthropic-sdk-python/blob/main/scripts/mock
-STAINLESS_MOCK_SERVER_VERSION=0.22.1
-STAINLESS_MOCK_SERVER_PACKAGE_JSON="${FILESDIR}/${PN}-0.116.0-mock-server-package.json"
+STAINLESS_MOCK_SERVER_VERSION=0.22.2
+STAINLESS_MOCK_SERVER_PACKAGE_JSON="${FILESDIR}/${PN}-2.8.0-mock-server-package.json"
 
 inherit distutils-r1 optfeature stainless-python
 
@@ -27,17 +28,21 @@ SRC_URI+="
 "
 S="${WORKDIR}/${MY_P}"
 
-LICENSE="MIT"
+# MIT; vendored httpx_aiohttp (src/anthropic/_vendor): BSD
+LICENSE="MIT BSD"
 SLOT="0"
 KEYWORDS="~amd64 ~arm64"
 
 RDEPEND="
-	>=dev-python/anyio-3.5.0[${PYTHON_USEDEP}]
-	>=dev-python/distro-1.7.0[${PYTHON_USEDEP}]
+	>=dev-python/anyio-4.1.0[${PYTHON_USEDEP}]
 	>=dev-python/docstring-parser-0.15[${PYTHON_USEDEP}]
-	>=dev-python/httpx-0.25.0[${PYTHON_USEDEP}]
+	>=dev-python/httpx2-2.0.0[${PYTHON_USEDEP}]
+	<dev-python/httpx2-3[${PYTHON_USEDEP}]
 	>=dev-python/jiter-0.4.0[${PYTHON_USEDEP}]
-	>=dev-python/pydantic-1.9.0[${PYTHON_USEDEP}]
+	<dev-python/jiter-1[${PYTHON_USEDEP}]
+	>=dev-python/opentelemetry-api-1.1.0[${PYTHON_USEDEP}]
+	<dev-python/opentelemetry-api-2[${PYTHON_USEDEP}]
+	>=dev-python/pydantic-1.10.0[${PYTHON_USEDEP}]
 	dev-python/sniffio[${PYTHON_USEDEP}]
 	>=dev-python/typing-extensions-4.14[${PYTHON_USEDEP}]
 "
@@ -45,9 +50,11 @@ RDEPEND="
 BDEPEND="
 	dev-python/hatch-fancy-pypi-readme[${PYTHON_USEDEP}]
 	test? (
+		dev-python/aiohttp[${PYTHON_USEDEP}]
 		>=dev-python/boto3-1.28.57[${PYTHON_USEDEP}]
 		>=dev-python/botocore-1.31.57[${PYTHON_USEDEP}]
-		>=dev-python/httpx-aiohttp-0.1.9[${PYTHON_USEDEP}]
+		dev-python/hypothesis[${PYTHON_USEDEP}]
+		dev-python/opentelemetry-sdk[${PYTHON_USEDEP}]
 		>=dev-python/rich-13.7.1[${PYTHON_USEDEP}]
 		>=dev-python/standardwebhooks-1.0.1[${PYTHON_USEDEP}]
 	)
@@ -65,11 +72,13 @@ distutils_enable_tests pytest
 
 pkg_postinst() {
 	optfeature "alternative async HTTP client support" \
-		"dev-python/aiohttp >=dev-python/httpx-aiohttp-0.1.9"
+		">=dev-python/aiohttp-3.10.0"
 	optfeature "Google Cloud Vertex AI integration" \
 		">=dev-python/google-auth-2 dev-python/requests"
 	optfeature "Amazon Web Services (AWS) Bedrock integration" \
 		">=dev-python/boto3-1.28.57 >=dev-python/botocore-1.31.57"
 	optfeature "Model Context Protocol (MCP) support" \
 		">=dev-python/mcp-1.0"
+	optfeature "webhook signature verification" \
+		">=dev-python/standardwebhooks-1.0.1"
 }

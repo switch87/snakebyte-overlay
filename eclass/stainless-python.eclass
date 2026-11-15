@@ -38,6 +38,15 @@ inherit distutils-r1
 # @DESCRIPTION:
 # The path of the OpenAPI spec file relative to ${STAINLESS_SPEC_BASE_URI}.
 
+# @ECLASS_VARIABLE: STAINLESS_SPEC_FILE
+# @PRE_INHERIT
+# @DEFAULT_UNSET
+# @DESCRIPTION:
+# The path of an OpenAPI spec file bundled with the sources, relative to
+# ${S} (may be gzip-compressed, e.g. scripts/mock-spec.json.gz).
+# When set, STAINLESS_SPEC_PATH is not needed and no spec is fetched.
+# (::snakebyte addition, not in the ::guru eclass.)
+
 # @ECLASS_VARIABLE: STAINLESS_SPEC_DISTNAME
 # @PRE_INHERIT
 # @DESCRIPTION:
@@ -103,8 +112,14 @@ STAINLESS_MOCK_SERVER_DISTFILES=()
 # The port the mock server actually bound to.
 
 _stainless_set_globals() {
-	[[ -n ${STAINLESS_SPEC_PATH} ]] ||
-		die "STAINLESS_SPEC_PATH undefined."
+	[[ -n ${STAINLESS_SPEC_PATH} || -n ${STAINLESS_SPEC_FILE} ]] ||
+		die "STAINLESS_SPEC_PATH or STAINLESS_SPEC_FILE must be defined."
+
+	local spec_uri=
+	if [[ -z ${STAINLESS_SPEC_FILE} ]]; then
+		spec_uri="${STAINLESS_SPEC_BASE_URI}/${STAINLESS_SPEC_PATH}
+				-> ${STAINLESS_SPEC_DISTNAME}"
+	fi
 	[[ -n ${STAINLESS_MOCK_SERVER_VERSION} ]] ||
 		die "STAINLESS_MOCK_SERVER_VERSION undefined."
 	[[ -n ${STAINLESS_MOCK_SERVER_PACKAGE_JSON} ]] ||
@@ -115,8 +130,7 @@ _stainless_set_globals() {
 
 	SRC_URI="
 		test? (
-			${STAINLESS_SPEC_BASE_URI}/${STAINLESS_SPEC_PATH}
-				-> ${STAINLESS_SPEC_DISTNAME}
+			${spec_uri}
 
 			${stdy_base_uri}/cli/-/cli-${stdy_pv}.tgz
 				-> stdy-cli-${stdy_pv}.npm.tgz
@@ -318,6 +332,15 @@ stainless_start_mock_server() {
 		fi
 	fi
 
+	local spec="${DISTDIR}/${STAINLESS_SPEC_DISTNAME}"
+	if [[ -n ${STAINLESS_SPEC_FILE} ]]; then
+		spec="${S}/${STAINLESS_SPEC_FILE}"
+		if [[ ${spec} == *.gz ]]; then
+			gunzip -c "${spec}" > "${T}/stainless-spec.json" || die
+			spec="${T}/stainless-spec.json"
+		fi
+	fi
+
 	einfo "Starting mock server ..."
 
 	# Replicate the logic from scripts/mock --daemon
@@ -328,7 +351,7 @@ stainless_start_mock_server() {
 		--validator-form-object-format=brackets \
 		--validator-query-object-format=brackets \
 		"${STAINLESS_MOCK_SERVER_EXTRA_ARGS[@]}" \
-		"${DISTDIR}/${STAINLESS_SPEC_DISTNAME}" &>"${T}/stainless-steady.log" &
+		"${spec}" &>"${T}/stainless-steady.log" &
 	STAINLESS_MOCK_SERVER_PID=${!}
 
 	_stainless_wait_for_mock_server
