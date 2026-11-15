@@ -202,6 +202,10 @@ LICENSE+="
 SLOT="0"
 KEYWORDS="~amd64"
 
+RDEPEND="
+	dev-python/zeroconf[${PYTHON_USEDEP}]
+"
+
 QA_FLAGS_IGNORED="usr/lib.*/py.*/site-packages/raydriver/.*\\.so"
 
 # pyo3 0.28 abi3-py311 wheel is built once per impl; keep it simple and

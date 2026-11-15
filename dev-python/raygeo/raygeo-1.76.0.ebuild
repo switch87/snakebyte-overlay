@@ -8,6 +8,7 @@ DISTUTILS_USE_PEP517=maturin
 PYTHON_COMPAT=( python3_{11..14} )
 
 CRATES="
+	adler2@2.0.1
 	aho-corasick@1.1.4
 	allocator-api2@0.2.21
 	android_system_properties@0.1.5
@@ -24,21 +25,21 @@ CRATES="
 	cfg-if@1.0.4
 	chacha20@0.10.1
 	chrono@0.4.45
-	clipper2@0.6.0
-	clipper2c-sys@0.2.0
+	clipper2-rs@0.3.0
 	core-foundation-sys@0.8.7
 	cpufeatures@0.3.0
+	crc32fast@1.5.5
 	crossbeam-deque@0.8.6
 	crossbeam-epoch@0.9.18
 	crossbeam-utils@0.8.21
 	crunchy@0.2.4
-	cty@0.2.2
 	deranged@0.5.8
-	earcut@0.4.11
+	earcut@0.4.12
 	either@1.17.0
 	equivalent@1.0.2
 	euclid@0.22.14
 	find-msvc-tools@0.1.9
+	flate2@1.1.11
 	foldhash@0.2.0
 	font-types@0.11.3
 	fontconfig-parser@0.5.8
@@ -53,6 +54,7 @@ CRATES="
 	glam@0.31.1
 	glam@0.32.1
 	glam@0.33.12
+	glam@0.34.2
 	hash32@0.3.1
 	hashbrown@0.16.1
 	hashbrown@0.17.1
@@ -66,19 +68,17 @@ CRATES="
 	itertools@0.11.0
 	itertools@0.15.0
 	itoa@1.0.18
-	jobserver@0.1.35
 	js-sys@0.3.98
 	kurbo@0.13.1
 	lalrpop-util@0.20.2
-	libc@0.2.190
+	libc@0.2.191
 	libm@0.2.16
-	libmimalloc-sys@0.1.49
 	log@0.4.33
 	maplit@1.0.2
 	matrixmultiply@0.3.10
 	memchr@2.8.0
 	memmap2@0.9.11
-	mimalloc@0.1.52
+	miniz_oxide@0.9.1
 	nalgebra-macros@0.3.0
 	nalgebra-sparse@0.12.0
 	nalgebra@0.35.0
@@ -91,7 +91,7 @@ CRATES="
 	num-traits@0.2.19
 	num_enum@0.7.6
 	num_enum_derive@0.7.6
-	numpy@0.28.0
+	numpy@0.29.0
 	once_cell@1.21.4
 	ordered-float@5.3.0
 	phf@0.11.3
@@ -99,7 +99,6 @@ CRATES="
 	phf_generator@0.11.3
 	phf_shared@0.11.3
 	pin-project-lite@0.2.17
-	pkg-config@0.3.33
 	polycool@0.4.0
 	portable-atomic-util@0.2.7
 	portable-atomic@1.13.1
@@ -107,13 +106,13 @@ CRATES="
 	ppv-lite86@0.2.21
 	proc-macro-crate@3.5.0
 	proc-macro2@1.0.106
-	pyo3-build-config@0.28.3
-	pyo3-ffi@0.28.3
-	pyo3-macros-backend@0.28.3
-	pyo3-macros@0.28.3
-	pyo3-stub-gen-derive@0.23.1
-	pyo3-stub-gen@0.23.1
-	pyo3@0.28.3
+	pyo3-build-config@0.29.3
+	pyo3-ffi@0.29.3
+	pyo3-macros-backend@0.29.3
+	pyo3-macros@0.29.3
+	pyo3-stub-gen-derive@0.23.2
+	pyo3-stub-gen@0.23.2
+	pyo3@0.29.3
 	quote@1.0.45
 	r-efi@6.0.0
 	rand@0.10.3
@@ -132,8 +131,8 @@ CRATES="
 	rmp@0.8.15
 	robust@1.2.0
 	roxmltree@0.20.0
-	roxmltree@0.21.1
-	rstar@0.13.0
+	roxmltree@0.21.2
+	rstar@0.13.1
 	rustc-hash@1.1.0
 	rustc-hash@2.1.2
 	rustpython-ast@0.4.0
@@ -145,10 +144,11 @@ CRATES="
 	serde@1.0.229
 	serde_core@1.0.229
 	serde_derive@1.0.229
-	serde_json@1.0.151
+	serde_json@1.0.154
 	serde_spanned@1.1.1
 	shlex@1.3.0
 	simba@0.10.0
+	simd-adler32@0.3.10
 	siphasher@1.0.3
 	skrifa@0.42.1
 	slab@0.4.12
@@ -159,7 +159,7 @@ CRATES="
 	static_assertions@1.1.0
 	strum@0.28.0
 	strum_macros@0.28.0
-	svgtypes@0.16.1
+	svgtypes@0.16.2
 	swash@0.2.10
 	syn@2.0.117
 	syn@3.0.6
@@ -206,9 +206,6 @@ CRATES="
 	zerocopy-derive@0.8.48
 	zerocopy@0.8.48
 	zmij@1.0.21
-	zstd-safe@8.0.0
-	zstd-sys@2.1.0+zstd.1.5.7
-	zstd@0.14.0
 "
 
 inherit cargo distutils-r1 pypi
@@ -225,8 +222,8 @@ SRC_URI+="
 LICENSE="MIT"
 # Dependent crate licenses
 LICENSE+="
-	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 BSD CC0-1.0 MIT
-	Unicode-3.0 Unicode-DFS-2016 ZLIB
+	Apache-2.0 Apache-2.0-with-LLVM-exceptions BSD-2 Boost-1.0 CC0-1.0
+	MIT Unicode-3.0 Unicode-DFS-2016 ZLIB
 "
 SLOT="0"
 KEYWORDS="~amd64"

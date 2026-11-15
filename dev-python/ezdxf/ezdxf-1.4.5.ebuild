@@ -20,7 +20,7 @@ KEYWORDS="~amd64 ~arm64"
 RESTRICT="test"
 
 RDEPEND="
-	>=dev-python/pyparsing-2.0.1[${PYTHON_USEDEP}]
+	>=dev-python/pyparsing-3.0.0[${PYTHON_USEDEP}]
 	>=dev-python/typing-extensions-4.6.0[${PYTHON_USEDEP}]
 	dev-python/numpy[${PYTHON_USEDEP}]
 	dev-python/fonttools[${PYTHON_USEDEP}]
