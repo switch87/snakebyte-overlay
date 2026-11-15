@@ -37,6 +37,7 @@ prepare_prefix() {
 	# Visual C++ runtimes shipped inside the upstream installer
 	local r
 	for r in vcredist_2010_x64.exe vcredist_2015-2022_x64.exe; do
+		[[ -f ${APPDIR}/redist/${r} ]] || continue
 		wine "${APPDIR}/redist/${r}" /q /norestart || true
 		wineserver --wait
 	done

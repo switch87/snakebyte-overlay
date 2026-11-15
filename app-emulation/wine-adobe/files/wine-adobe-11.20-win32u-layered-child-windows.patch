@@ -1,6 +1,4 @@
-From ec0c2dfe788d4e1aa2e9fd6462f5b710e6a57fa4 Mon Sep 17 00:00:00 2001
 From: Gert Pellin <gert@pellin.be>
-Date: Wed, 7 Oct 2026 09:08:39 +0200
 Subject: [PATCH] win32u: Draw layered child windows on top of
  UpdateLayeredWindow surfaces.
 
@@ -8,16 +6,17 @@ Since Windows 8 child windows can have WS_EX_LAYERED, and the compositor
 draws them on top of a top-level window that uses UpdateLayeredWindow.
 Photoshop's contextual task bar is such a window: its adjustment ComboBox
 is a layered child and stayed invisible.
----
- dlls/win32u/window.c | 93 ++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 93 insertions(+)
 
+Ported to Wine 11.20 with LinDobe 0.6.1: children with LWA_ALPHA 255 and
+no colour key are composed by LinDobe patch 0142 from their own offscreen
+surface, so this only draws the remaining layered children (partial
+alpha, colour key).
+---
 diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
-index a402fcc..6794651 100644
 --- a/dlls/win32u/window.c
 +++ b/dlls/win32u/window.c
-@@ -2740,6 +2740,97 @@ BOOL WINAPI NtUserSetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alph
-     return ret;
+@@ -2896,6 +2896,101 @@
+     free( children );
  }
  
 +/* draw a layered child window on top of the layered surface of its top-level window */
@@ -33,6 +32,15 @@ index a402fcc..6794651 100644
 +    HBITMAP bitmap;
 +    HDC hdc, hdc_dst;
 +    int i, width, height;
++
++    if (NtUserGetLayeredWindowAttributes( child, &key, &alpha, &lwa_flags ))
++    {
++        /* opaque LWA_ALPHA-only children get their own offscreen surface, which is
++         * composed over the per-pixel parent at presentation time */
++        if (lwa_flags == LWA_ALPHA && alpha == 255) return;
++        if (!(lwa_flags & LWA_ALPHA)) alpha = 255;
++        if (!(lwa_flags & LWA_COLORKEY)) key = CLR_INVALID;
++    }
 +
 +    get_window_rect( child, &rect, get_thread_dpi() );
 +    OffsetRect( &rect, -window_rect->left, -window_rect->top );
@@ -54,11 +62,6 @@ index a402fcc..6794651 100644
 +    NtGdiSelectBitmap( hdc, bitmap );
 +    send_message( child, WM_PRINT, (WPARAM)hdc, PRF_NONCLIENT | PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN );
 +
-+    if (NtUserGetLayeredWindowAttributes( child, &key, &alpha, &lwa_flags ))
-+    {
-+        if (!(lwa_flags & LWA_ALPHA)) alpha = 255;
-+        if (!(lwa_flags & LWA_COLORKEY)) key = CLR_INVALID;
-+    }
 +    if (key != CLR_INVALID) key_pixel = (GetRValue( key ) << 16) | (GetGValue( key ) << 8) | GetBValue( key );
 +
 +    /* GDI leaves the alpha channel at zero: make the child opaque, apart from its colour key */
@@ -114,7 +117,7 @@ index a402fcc..6794651 100644
  /*****************************************************************************
   *           UpdateLayeredWindow (win32u.@)
   */
-@@ -2836,6 +2927,8 @@ BOOL WINAPI NtUserUpdateLayeredWindow( HWND hwnd, HDC hdc_dst, const POINT *pts_
+@@ -2993,6 +3088,8 @@
          NtGdiDeleteObjectApp( hdc );
          window_surface_unlock( surface );
  
@@ -122,7 +125,4 @@ index a402fcc..6794651 100644
 +
          if (!(flags & ULW_COLORKEY)) key = CLR_INVALID;
          window_surface_set_layered( surface, key, -1, 0xff000000 );
- 
--- 
-2.55.0
-
+         if (!had_alpha) update_layered_children( hwnd );

@@ -1,13 +1,16 @@
 #!/bin/bash
-# Create an ebuild for the current release on Claude Code's "stable" channel.
-# Usage: bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump
+# Create an ebuild for the current release on a Claude Code release channel.
+# Usage: bash /var/db/repos/snakebyte/dev-util/claude-code/files/claude-code-bump [stable|latest]
+# (default: stable)
 # Drop this package from snakebyte again once ::gentoo carries the version.
 
 set -euo pipefail
 
 PKGDIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-ver=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/stable)
+channel=${1:-stable}
+[[ ${channel} == @(stable|latest) ]] || { echo "unknown channel '${channel}'" >&2; exit 1; }
+ver=$(curl -fsSL "https://downloads.claude.ai/claude-code-releases/${channel}")
 [[ ${ver} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version '${ver}'" >&2; exit 1; }
 
 new="${PKGDIR}/claude-code-${ver}.ebuild"

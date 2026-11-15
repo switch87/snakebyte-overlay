@@ -1,0 +1,85 @@
+diff --git a/bin/env.sh b/bin/env.sh
+index 633439e..5b31ccb 100644
+--- a/bin/env.sh
++++ b/bin/env.sh
+@@ -11,10 +11,8 @@ ADOBEWINE_SRC="$(cd "$(dirname "$_aw_env")/.." && pwd)"; unset _aw_env
+ ADOBEWINE_HOME="${ADOBEWINE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/adobewine}"
+ export ADOBEWINE_SRC ADOBEWINE_HOME
+ export WINEPREFIX="${WINEPREFIX:-$ADOBEWINE_HOME/prefix}"
+-# Runtime: the packaged one (e.g. /opt/adobewine/runtime from the AUR package) or the one
+-# scripts/build-wine.sh built into $ADOBEWINE_HOME/runtime.
+-if [ -x "$ADOBEWINE_SRC/runtime/bin/wine" ]; then ADOBEWINE_RUNTIME="$ADOBEWINE_SRC/runtime"
+-else ADOBEWINE_RUNTIME="$ADOBEWINE_HOME/runtime"; fi
++# Runtime: Gentoo's app-emulation/wine-adobe (Wine + the LinDobe patches).
++ADOBEWINE_RUNTIME="${ADOBEWINE_RUNTIME:-/usr/lib/wine-adobe-@WINE_V@}"
+ export ADOBEWINE_RUNTIME
+ export PATH="$ADOBEWINE_RUNTIME/bin:$PATH"
+ export WINEARCH=win64
+diff --git a/scripts/setup-prefix.sh b/scripts/setup-prefix.sh
+index 76a033f..2fc1e0f 100755
+--- a/scripts/setup-prefix.sh
++++ b/scripts/setup-prefix.sh
+@@ -18,44 +18,22 @@ while [ $# -gt 0 ]; do
+     *) echo "unknown option $1" >&2; exit 1 ;;
+   esac
+ done
+-[ -x "$ADOBEWINE_RUNTIME/bin/wine" ] || { echo "no LinDobe runtime: install the adobewine package or run scripts/build-wine.sh" >&2; exit 1; }
++[ -x "$ADOBEWINE_RUNTIME/bin/wine" ] || { echo "no LinDobe runtime: emerge app-emulation/wine-adobe" >&2; exit 1; }
+ for t in winetricks cabextract; do command -v $t >/dev/null || { echo "$t is required (install it from your distribution)" >&2; exit 1; }; done
+-DEPS="$ADOBEWINE_HOME/deps"
+-ls -d "$DEPS"/dxvk-*/ >/dev/null 2>&1 || "$ADOBEWINE_SRC/scripts/fetch-deps.sh"
++# DXVK, vkd3d-proton and nvidia-libs are installed by Portage (app-emulation/adobewine).
++DEPS="$ADOBEWINE_SRC/deps"
+ SYS="$WINEPREFIX/drive_c/windows/system32"
+ SYS32="$WINEPREFIX/drive_c/windows/syswow64"
+ 
+-# Browser engine (wine-gecko) and .NET replacement (wine-mono): the Creative Cloud
+-# installer's pages stay on "Loading..." without gecko. They are downloaded before the first boot
+-# and put where Wine looks for them (~/.cache/wine), so wineboot installs and registers them
+-# silently instead of asking in a dialog.
+-SHARE="$ADOBEWINE_HOME/cache"
+-WINECACHE="${XDG_CACHE_HOME:-$HOME/.cache}/wine"
+-mkdir -p "$SHARE/gecko" "$SHARE/mono" "$WINECACHE"
++# Browser engine (wine-gecko) and .NET replacement (wine-mono) come from Portage
++# (app-emulation/wine-gecko, app-emulation/wine-mono, shared installs that wineboot
++# picks up); the Creative Cloud installer's pages stay on "Loading..." without gecko.
+ get() {  # get <file> <url> <sha256>: a download cut short is fetched again instead of kept
+   [ -f "$1" ] && echo "$3  $1" | sha256sum -c --quiet 2>/dev/null && return
+   curl -fsSL --retry 3 -o "$1.part" "$2" && echo "$3  $1.part" | sha256sum -c --quiet && mv "$1.part" "$1"
+ }
+-get "$SHARE/gecko/wine-gecko-2.47.4-x86.msi" https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+-    26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6
+-get "$SHARE/gecko/wine-gecko-2.47.4-x86_64.msi" https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+-    e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f
+-get "$SHARE/mono/wine-mono-11.3.0-x86.msi" https://dl.winehq.org/wine/wine-mono/11.3.0/wine-mono-11.3.0-x86.msi \
+-    df2dfc1665c2511882e7cabd56eafd0c0a3d94e5a7e86f969277f6c189d418d3
+-for f in "$SHARE"/gecko/*.msi "$SHARE"/mono/*.msi; do [ -e "$WINECACHE/${f##*/}" ] || ln -s "$f" "$WINECACHE/"; done
+-
+ [ -f "$WINEPREFIX/system.reg" ] || wineboot -i
+ wineserver -w
+-# Older prefixes, or a first boot that could not install them: install them directly.
+-[ -d "$SYS/gecko/2.47.4" ] || { wine msiexec /i "$SHARE/gecko/wine-gecko-2.47.4-x86_64.msi" /qn; wine msiexec /i "$SHARE/gecko/wine-gecko-2.47.4-x86.msi" /qn; }
+-[ -d "$WINEPREFIX/drive_c/windows/mono" ] || wine msiexec /i "$SHARE/mono/wine-mono-11.3.0-x86.msi" /qn
+-# Windows Installer keeps a copy of every package it installed (windows/Installer), byte for byte the downloads
+-# above: hardlinked instead of stored twice (184 MB). It only reads them, for repair and uninstall.
+-for c in "$WINEPREFIX"/drive_c/windows/Installer/*.msi; do
+-  for f in "$SHARE"/gecko/*.msi "$SHARE"/mono/*.msi; do
+-    [ "$c" -ef "$f" ] || { [ "$(stat -c %s "$c")" = "$(stat -c %s "$f")" ] && cmp -s "$c" "$f" && ln -f "$f" "$c"; } || true
+-  done
+-done
+ 
+ # Microsoft's shader compiler (Audition compiles HLSL at run time) and the core fonts
+ # (the Creative Cloud renderer crashes without real Windows fonts).
+@@ -194,6 +172,12 @@ elif ! ls "$WINEPREFIX/drive_c/windows/Fonts/"segoeui.ttf >/dev/null 2>&1; then
+     echo "      or install the Selawik fonts and run setup again." >&2
+   fi
+ fi
++# Prefixes made by app-emulation/adobewine-0.1.0-r1 map Segoe UI to Selawik through GDI
++# FontSubstitutes; with a real Segoe UI those would steer GDI away from it.
++FS='HKLM\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes'
++for w in "" " Light" " Semilight" " Semibold" " Bold"; do
++  wine reg query "$FS" /v "Segoe UI$w" 2>/dev/null | grep -q Selawik && wine reg delete "$FS" /v "Segoe UI$w" /f >/dev/null
++done
+ "$ADOBEWINE_SRC/scripts/register-fonts.sh"
+ # ADOBEWINE_LINK_DLLS=1 (the Flatpak sets it): Wine's own DLLs in system32/syswow64 become links to the runtime
+ # instead of copies, as Proton does (about 1.8 GB less per prefix). Only files identical to the runtime's are

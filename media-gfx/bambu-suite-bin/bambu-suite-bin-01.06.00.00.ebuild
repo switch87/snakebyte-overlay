@@ -8,12 +8,12 @@ inherit desktop xdg
 # The CDN path contains an upload timestamp that cannot be derived from ${PV}.
 # Look it up on https://bambulab.com/en/download/suite (or run
 # files/bambu-suite-bump) when bumping.
-BUILD_STAMP="20260922_160447_746"
+BUILD_STAMP="20261103_152935_990"
 MY_P="Bambu_Suite_Public_Win_${PV}"
 
 DESCRIPTION="Bambu Lab laser and cutting module software (Windows build via Wine)"
 HOMEPAGE="https://bambulab.com/en/download/suite"
-SRC_URI="https://public-cdn.bblmw.cn/general_pkg/prod/setup/${BUILD_STAMP}/${MY_P}.exe"
+SRC_URI="https://public-cdn.bblmw.com/general_pkg/prod/setup/${BUILD_STAMP}/${MY_P}.exe"
 S="${WORKDIR}"
 
 LICENSE="all-rights-reserved"

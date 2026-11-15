@@ -7,18 +7,18 @@ inherit optfeature wine
 
 WINE_GECKO=2.47.4
 WINE_MONO=11.3.0
-ADOBEWINE_PV=0.1.0
+ADOBEWINE_PV=0.6.1
 (( $(ver_cut 2) )) && WINE_SDIR=$(ver_cut 1).x || WINE_SDIR=$(ver_cut 1).0
 
-DESCRIPTION="Wine with the AdobeWine patchset for Adobe Creative Cloud apps"
+DESCRIPTION="Wine with the LinDobe (AdobeWine) patchset for Adobe Creative Cloud apps"
 HOMEPAGE="
-	https://github.com/le-birnes/AdobeWine
+	https://github.com/le-birnes/LinDobe
 	https://www.winehq.org/
 	https://gitlab.winehq.org/wine/wine/
 "
 SRC_URI="
 	https://dl.winehq.org/wine/source/${WINE_SDIR}/wine-${PV}.tar.xz
-	https://github.com/le-birnes/AdobeWine/archive/refs/tags/v${ADOBEWINE_PV}.tar.gz
+	https://github.com/le-birnes/LinDobe/archive/refs/tags/v${ADOBEWINE_PV}.tar.gz
 		-> adobewine-${ADOBEWINE_PV}.tar.gz
 "
 S=${WORKDIR}/wine-${PV}
@@ -150,11 +150,12 @@ PATCHES=(
 )
 
 src_prepare() {
-	# AdobeWine: fixes for the Creative Cloud installer, sign-in and the
+	# LinDobe: fixes for the Creative Cloud installer, sign-in and the
 	# apps themselves (MSHTML/MSXML, D2D, DirectWrite, heap, WinHTTP, ...)
-	PATCHES+=( "${WORKDIR}"/AdobeWine-${ADOBEWINE_PV}/patches/*.patch )
+	PATCHES+=( "${WORKDIR}"/LinDobe-${ADOBEWINE_PV}/patches/*.patch )
 	# Draw layered child windows on top of UpdateLayeredWindow windows, as
-	# the Windows 8+ compositor does (Photoshop contextual task bar picker)
+	# the Windows 8+ compositor does (Photoshop contextual task bar picker);
+	# opaque ones are left to LinDobe's patch 0142
 	PATCHES+=( "${FILESDIR}"/${P}-win32u-layered-child-windows.patch )
 
 	wine_src_prepare

@@ -190,9 +190,10 @@ PYTHON_COMPAT=( python3_{12..14} )
 inherit cargo edo multiprocessing python-any-r1 udev unpacker xdg
 
 # wispr-flow-linux wrapper release bundling Wispr Flow ${PV}
-WRAPPER_PV="1.0.4"
-HELPER_PV="0.1.2"
-# Newer Electron than the 42.3.0 upstream bundles: Chromium < 151 clamps a
+WRAPPER_PV="1.0.5"
+# 0.1.3+ carries the fix for stuck modifiers (issue #123, helper PR #14)
+HELPER_PV="0.1.4"
+# Newer Electron than the 42.3.0 upstream (still) bundles: Chromium < 151 clamps a
 # Wayland fractional scale below 1 (e.g. KDE 75%) to 1.0, so pointer input
 # misses the controls (crbug.com/438038776, wispr-flow-linux issue #130).
 ELECTRON_PV="44.7.2"
@@ -261,10 +262,6 @@ RDEPEND="
 	x11-libs/pango
 	virtual/udev
 "
-
-PATCHES=(
-	"${FILESDIR}"/wispr-flow-helper-0.1.2-no-modifier-restore.patch
-)
 
 QA_PREBUILT="usr/lib/wispr-flow/*"
 

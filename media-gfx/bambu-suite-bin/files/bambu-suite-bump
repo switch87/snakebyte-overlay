@@ -20,7 +20,9 @@ if [[ -e ${new} ]]; then
 fi
 
 latest=$(ls "${PKGDIR}"/bambu-suite-bin-*.ebuild | sort -V | tail -n1)
-sed -E "s/^BUILD_STAMP=.*/BUILD_STAMP=\"${stamp}\"/" "${latest}" > "${new}"
+host=$(sed -E 's|^(https://[^/]+)/.*|\1|' <<<"${url}")
+sed -E -e "s/^BUILD_STAMP=.*/BUILD_STAMP=\"${stamp}\"/" \
+	-e "s|https://public-cdn\.bblmw\.[a-z]+/|${host}/|" "${latest}" > "${new}"
 sudo ebuild "${new}" manifest
 echo "created ${new}"
 echo "install with: emerge -av media-gfx/bambu-suite-bin"

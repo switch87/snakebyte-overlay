@@ -22,6 +22,7 @@ RDEPEND="
 	dev-libs/nss
 	media-libs/alsa-lib
 	media-libs/mesa[gbm(+)]
+	media-video/pipewire
 	sys-apps/util-linux
 	sys-apps/xdg-desktop-portal
 	x11-libs/gtk+:3
@@ -47,6 +48,10 @@ src_install() {
 	mv usr/share/doc/claude-desktop usr/share/doc/${PF} || die
 
 	cp -a usr "${ED}"/ || die
+
+	# MIME types for .mcpb, .dxt and .skill (registered by the deb's postinst)
+	insinto /usr/share/mime/packages
+	doins usr/lib/claude-desktop/resources/linux-mime/com.anthropic.Claude.xml
 	fowners root:root /usr/lib/claude-desktop/chrome-sandbox
 	fperms 4755 /usr/lib/claude-desktop/chrome-sandbox
 

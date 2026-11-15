@@ -3,23 +3,24 @@
 
 EAPI=8
 
-inherit unpacker
+inherit optfeature unpacker
 
-WINE_V=11.18
+WINE_V=11.20
 DXVK_V=3.1.1
 VKD3D_V=3.0.1
 NVLIBS_V=1.0.2
+MY_P="LinDobe-${PV}"
 
-DESCRIPTION="Prefix setup and launcher for Adobe Creative Cloud apps under Wine"
-HOMEPAGE="https://github.com/le-birnes/AdobeWine"
+DESCRIPTION="Prefix setup and launcher for Adobe Creative Cloud apps under Wine (LinDobe)"
+HOMEPAGE="https://github.com/le-birnes/LinDobe"
 SRC_URI="
-	https://github.com/le-birnes/AdobeWine/archive/refs/tags/v${PV}.tar.gz
+	https://github.com/le-birnes/LinDobe/archive/refs/tags/v${PV}.tar.gz
 		-> ${P}.tar.gz
 	https://github.com/doitsujin/dxvk/releases/download/v${DXVK_V}/dxvk-${DXVK_V}.tar.gz
 	https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v${VKD3D_V}/vkd3d-proton-${VKD3D_V}.tar.zst
 	https://github.com/SveSop/nvidia-libs/releases/download/v${NVLIBS_V}/nvidia-libs-v${NVLIBS_V}.tar.xz
 "
-S="${WORKDIR}/AdobeWine-${PV}"
+S="${WORKDIR}/${MY_P}"
 
 LICENSE="LGPL-2.1+ ZLIB MIT"
 SLOT="0"
@@ -30,6 +31,7 @@ RDEPEND="
 	~app-emulation/wine-adobe-${WINE_V}[gecko,mono,vulkan,wow64]
 	app-emulation/winetricks
 	app-arch/7zip
+	app-arch/cabextract
 	media-fonts/selawik
 	dev-python/pillow
 	media-libs/fontconfig
@@ -44,12 +46,16 @@ BDEPEND="
 QA_PREBUILT="opt/adobewine/deps/* opt/adobewine/lib/*"
 
 PATCHES=(
-	"${FILESDIR}"/${P}-gentoo-paths.patch
-	# Upstream 0.2.2 ships the Gentoo install docs (PR 7) and the Selawik as
-	# Segoe UI / D3D12 feature level / newest installed release fixes as
-	# pull requests 3-5; only the two fixes below stay local.
-	"${FILESDIR}"/${P}-selawik-substitutes-cleanup.patch
+	# Portage's wine-adobe, DXVK/vkd3d-proton/nvidia-libs, wine-gecko and
+	# wine-mono instead of downloads; drop the Selawik GDI substitutes that
+	# adobewine-0.1.0-r1 wrote
+	"${FILESDIR}"/${P}-gentoo.patch
 )
+
+src_prepare() {
+	default
+	sed -i -e "s/@WINE_V@/${WINE_V}/" bin/env.sh || die
+}
 
 src_compile() {
 	local -x PATH="${BROOT}/usr/lib/mingw64-toolchain/bin:${PATH}"
@@ -63,12 +69,16 @@ src_install() {
 	local dir=/opt/adobewine
 
 	insinto ${dir}
-	doins -r scripts shims tools patches VERSION
+	doins -r config hub scripts shims tools patches VERSION
 	exeinto ${dir}/bin
 	doexe bin/adobewine
 	insinto ${dir}/bin
-	doins bin/env.sh
-	fperms +x ${dir}/scripts/{build-wine,fetch-deps,install-launchers,make-release,register-fonts,report,setup-prefix}.sh
+	doins bin/env.sh bin/app-catalog.sh
+	fperms +x ${dir}/hub/adobewine-hub
+	local f
+	for f in scripts/*.sh scripts/*.py tools/*.sh tools/*.py; do
+		fperms +x ${dir}/${f}
+	done
 
 	insinto ${dir}/lib
 	doins d3d12.dll winclose.exe d3d12fl.exe
@@ -76,14 +86,16 @@ src_install() {
 	insinto ${dir}/deps
 	doins -r "${WORKDIR}"/dxvk-${DXVK_V} "${WORKDIR}"/vkd3d-proton-${VKD3D_V} \
 		"${WORKDIR}"/nvidia-libs-v${NVLIBS_V}
+	fperms +x ${dir}/deps/nvidia-libs-v${NVLIBS_V}/{setup_nvlibs,nvml_setup}.sh
 
 	dosym -r ${dir}/bin/adobewine /usr/bin/adobewine
 	dodoc README.md CHANGELOG.md docs/*.md
 }
 
 pkg_postinst() {
-	elog "AdobeWine runs Adobe Creative Cloud apps with app-emulation/wine-adobe."
-	elog "Everything per user lives in \${XDG_DATA_HOME:-~/.local/share}/adobewine."
+	elog "LinDobe (formerly AdobeWine) runs Adobe Creative Cloud apps with"
+	elog "app-emulation/wine-adobe. Everything per user lives in"
+	elog "\${XDG_DATA_HOME:-~/.local/share}/adobewine."
 	elog
 	elog "  adobewine setup [--windows-fonts DIR]   create the prefix (once)"
 	elog "  adobewine run <installer.exe>          e.g. the Creative Cloud installer"
@@ -92,13 +104,14 @@ pkg_postinst() {
 	elog
 	elog "Adobe's UI needs Segoe UI. Pass the Fonts folder of a Windows installation"
 	elog "you own with --windows-fonts; without it, setup makes Segoe UI from Selawik."
-	elog "Setup also checks the Direct3D 12 feature level and reports 12_0/12_1 on GPUs"
-	elog "whose driver offers only 11_x, so Photoshop and Camera Raw use the GPU;"
-	elog "on NVIDIA cards it installs the CUDA/NVENC/NVAPI bridges from nvidia-libs."
+	elog "The patched DXVK/vkd3d-proton/nvcuda builds of upstream's build-gpu-deps.sh"
+	elog "(After Effects viewers, Premiere on Intel, Lightroom videos) are not built"
+	elog "here; the stock DXVK ${DXVK_V} and vkd3d-proton ${VKD3D_V} are used."
 	if [[ -n ${REPLACING_VERSIONS} ]]; then
 		elog
 		elog "Upgrading: run 'adobewine setup' once more so existing prefixes get"
-		elog "the new patches (After Effects render queue, Illustrator fonts, HiDPI)."
+		elog "the new Wine runtime and settings."
 	fi
-	elog "If the Adobe sign-in window stays blank: adobewine fix-signin"
+	optfeature "the LinDobe hub window (/opt/adobewine/hub/adobewine-hub)" \
+		"gui-libs/libadwaita dev-python/pygobject"
 }
