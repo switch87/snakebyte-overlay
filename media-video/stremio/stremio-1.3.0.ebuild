@@ -254,6 +254,7 @@ CRATES="
 	serde_spanned@1.1.1
 	sharded-slab@0.1.7
 	shared_library@0.1.9
+	shellexpand@3.1.2
 	shlex@2.0.1
 	signal-hook-registry@1.4.8
 	simd-adler32@0.3.9
@@ -408,16 +409,6 @@ QA_FLAGS_IGNORED="usr/libexec/stremio/stremio"
 
 src_prepare() {
 	default
-
-	# Upstream enables the gtk4-rs v4_22 / libadwaita-rs v1_9 API levels,
-	# but uses nothing newer than GTK 4.20 / libadwaita 1.8 (verified with
-	# cargo check). Lower them so we build against stable GTK.
-	sed -i \
-		-e '/^gtk = /s/"v4_22"/"v4_20"/' \
-		-e '/^adw = /s/"v1_9"/"v1_8"/' \
-		Cargo.toml || die
-	grep -q '"v4_20"' Cargo.toml && grep -q '"v1_8"' Cargo.toml \
-		|| die "lowering gtk/libadwaita API levels failed"
 
 	# Upstream only knows the in-tree (dev) and flatpak locale dirs.
 	sed -i \
