@@ -3,7 +3,6 @@
 
 EAPI=8
 
-PATCHSET="${P}-patchset-1"
 ECM_HANDBOOK="optional"
 # TODO: ECMGenerateQDoc
 ECM_TEST="true"
@@ -13,7 +12,6 @@ QTMIN=6.11.2
 inherit ecm fcaps plasma.kde.org python-any-r1 toolchain-funcs xdg
 
 DESCRIPTION="Flexible, composited Window Manager for windowing systems on Linux"
-SRC_URI+=" https://dev.gentoo.org/~asturm/distfiles/kde/${PATCHSET}.tar.xz"
 
 LICENSE="GPL-2+"
 SLOT="6"
@@ -126,9 +124,7 @@ esac
 FILECAPS=( -m 0755 cap_sys_nice=ep usr/bin/kwin_wayland )
 
 PATCHES=(
-	"${WORKDIR}/${PATCHSET}" # in 6.8.3
-	"${FILESDIR}/${PN}-6.7.6-persistent-cli-no_options.patch" # in 6.8.3; bug #985093
-	"${FILESDIR}/${P}-optional-setcap.patch" # pending; bug #984516
+	"${FILESDIR}/${PN}-6.8.2-optional-setcap.patch" # in 6.9; bug #984516
 	# ::snakebyte: touch edge rejection (KWin branch touchscreen-edge-rejection,
 	# not upstream); drop once upstream has it
 	"${FILESDIR}/${P}-touch-edge-rejection.patch"

@@ -60,7 +60,7 @@ COMMON_DEPEND="
 	>=kde-frameworks/kxmlgui-${KFMIN}:6
 	>=kde-frameworks/solid-${KFMIN}:6
 	>=kde-frameworks/sonnet-${KFMIN}:6
-	>=kde-plasma/kwin-6.8.2-r100:6
+	>=kde-plasma/kwin-6.8.3-r100:6
 	>=kde-plasma/libksysguard-${KDE_CATV}:6
 	>=kde-plasma/libplasma-${KDE_CATV}:6=
 	>=kde-plasma/plasma-activities-${KDE_CATV}:6=
@@ -102,7 +102,7 @@ DEPEND="${COMMON_DEPEND}
 RDEPEND="${COMMON_DEPEND}
 	dev-libs/kirigami-addons:6
 	>=kde-frameworks/kirigami-${KFMIN}:6
-	>=kde-plasma/kwin-${KDE_CATV}:6[X(-)]
+	>=kde-plasma/kwin-6.8.3-r100:6[X(-)]
 	>=kde-plasma/plasma-mimeapps-list-3
 	media-fonts/noto-emoji
 	sys-apps/util-linux
@@ -117,12 +117,6 @@ BDEPEND="
 	virtual/pkgconfig
 	input_devices_wacom? ( dev-util/wayland-scanner )
 "
-
-PATCHES=(
-	# ::snakebyte: touch edge rejection setting in the Touchscreen KCM (branch
-	# touchscreen-edge-rejection, not upstream); drop once upstream has it
-	"${FILESDIR}/${P}-touch-edge-rejection.patch"
-)
 
 src_prepare() {
 	ecm_src_prepare
@@ -177,3 +171,9 @@ pkg_postinst() {
 	fi
 	xdg_pkg_postinst
 }
+
+PATCHES=(
+	# ::snakebyte: touch edge rejection setting in the Touchscreen KCM (branch
+	# touchscreen-edge-rejection, not upstream); drop once upstream has it
+	"${FILESDIR}/${P}-touch-edge-rejection.patch"
+)

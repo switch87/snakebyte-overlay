@@ -1,15 +1,5 @@
-Touch edge rejection setting for the Touchscreen KCM of plasma-desktop 6.8.2
-(branch touchscreen-edge-rejection in ~/Workspace/src/plasma-desktop, not
-upstream): "Ignore touches starting near the edge" (Off, 0.5 to 10 mm) with
-the width in pixels, bound to KWin's touchEdgeRejectionWidth. Needs the KWin
-patch kwin-6.8.2-touch-edge-rejection.patch at build time (D-Bus interface).
-
-Generated with: git diff v6.8.2 touchscreen-edge-rejection-6.8.2 -- . ':!kcms/libkwindevices/tests'
-in ~/Workspace/src/plasma-desktop-6.8.2 (the tests ran on that branch).
-Applies with -p1 to plasma-desktop-6.8.2.tar.xz.
-
 diff --git a/kcms/libkwindevices/inputdevice.cpp b/kcms/libkwindevices/inputdevice.cpp
-index 76ed376b..9ad24284 100644
+index 76ed376b33..9ad2428443 100644
 --- a/kcms/libkwindevices/inputdevice.cpp
 +++ b/kcms/libkwindevices/inputdevice.cpp
 @@ -29,6 +29,7 @@ InputDevice::InputDevice(const QString &dbusName, QObject *parent)
@@ -71,7 +61,7 @@ index 76ed376b..9ad24284 100644
  
  #include "moc_inputdevice.cpp"
 diff --git a/kcms/libkwindevices/inputdevice.h b/kcms/libkwindevices/inputdevice.h
-index 1e560e06..801c3d85 100644
+index 1e560e0693..801c3d8591 100644
 --- a/kcms/libkwindevices/inputdevice.h
 +++ b/kcms/libkwindevices/inputdevice.h
 @@ -54,6 +54,8 @@ class InputDevice : public QObject
@@ -121,10 +111,10 @@ index 1e560e06..801c3d85 100644
      std::unique_ptr<OrgKdeKWinInputDeviceInterface> m_iface;
  };
 diff --git a/kcms/touchscreen/ui/main.qml b/kcms/touchscreen/ui/main.qml
-index 28f99a46..cceb4d3a 100644
+index 08908519da..67abb19e91 100644
 --- a/kcms/touchscreen/ui/main.qml
 +++ b/kcms/touchscreen/ui/main.qml
-@@ -83,5 +83,55 @@ KCMUtils.SimpleKCM {
+@@ -84,5 +84,55 @@ KCMUtils.SimpleKCM {
                  }
              }
          }
