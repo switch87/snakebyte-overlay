@@ -11,7 +11,7 @@ PYTHON_COMPAT=( python3_{12..14} )
 STAINLESS_SPEC_FILE=scripts/mock-spec.json.gz
 # See https://github.com/anthropics/anthropic-sdk-python/blob/main/scripts/mock
 STAINLESS_MOCK_SERVER_VERSION=0.22.2
-STAINLESS_MOCK_SERVER_PACKAGE_JSON="${FILESDIR}/${PN}-2.8.0-mock-server-package.json"
+STAINLESS_MOCK_SERVER_PACKAGE_JSON="${FILESDIR}/${PN}-2.12.0-mock-server-package.json"
 
 inherit distutils-r1 optfeature stainless-python
 
