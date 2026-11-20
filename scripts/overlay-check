@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Vergelijk de versies in ::snakebyte met de nieuwste upstream (PyPI, GitHub, npm)."""
+import json, re, subprocess, sys, urllib.request
+OV = "/var/db/repos/snakebyte"
+PYPI = {"PyMuPDF":"PyMuPDF","anthropic":"anthropic","asyncudp":"asyncudp","ezdxf":"ezdxf","http-snapshot":"http-snapshot",
+ "httpx-aiohttp":"httpx-aiohttp","jiter":"jiter","pipcl":"pipcl","playwright":"playwright","py-slvs":"py-slvs","pyee":"pyee",
+ "pymupdf-fonts":"pymupdf-fonts","pytest-base-url":"pytest-base-url","pytest-playwright":"pytest-playwright","pyvips":"pyvips",
+ "raydriver":"raydriver","raygeo":"raygeo","ruida-pa":"ruida-pa","standardwebhooks":"standardwebhooks","svgelements":"svgelements","vtracer":"vtracer"}
+GH = {"dev-lang/bun-bin":"oven-sh/bun","media-gfx/freecad":"FreeCAD/FreeCAD","media-sound/noson-app":"janbar/noson-app",
+ "media-gfx/rayforge":"barebaric/rayforge","sci-geosciences/qmapshack":"Maproom/qmapshack","media-fonts/selawik":"microsoft/Selawik",
+ "media-gfx/snapmaker-luban-bin":"Snapmaker/Luban","media-video/stremio":"Stremio/stremio-linux-shell","dev-util/opencode-bin":"anomalyco/opencode",
+ "app-emulation/adobewine":"le-birnes/LinDobe","dev-python/mupdf":"ArtifexSoftware/mupdf","dev-libs/libpresage":None}
+NPM = {"dev-util/claude-code":"@anthropic-ai/claude-code"}
+def get(url):
+    try:
+        return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent":"overlay-check"}), timeout=20).read().decode()
+    except Exception as e:
+        return None
+def ovver(cat, pn):
+    import glob, os
+    vs = [os.path.basename(f)[len(pn)+1:-7] for f in glob.glob(f"{OV}/{cat}/{pn}/{pn}-*.ebuild")]
+    from functools import cmp_to_key
+    key = lambda v: [int(x) if x.isdigit() else x for x in re.split(r"[.\-_]", v)]
+    return sorted(vs, key=lambda v: [(0,int(x)) if x.isdigit() else (1,x) for x in re.split(r"[.\-_]", v)])[-1] if vs else None
+for pn, name in PYPI.items():
+    d = get(f"https://pypi.org/pypi/{name}/json")
+    up = json.loads(d)["info"]["version"] if d else "?"
+    print(f"dev-python/{pn}\t{ovver('dev-python', pn)}\t{up}")
+for pkg, repo in GH.items():
+    cat, pn = pkg.split("/")
+    up = "?"
+    if repo:
+        d = get(f"https://api.github.com/repos/{repo}/releases/latest")
+        if d:
+            up = json.loads(d).get("tag_name", "?")
+        else:
+            d = get(f"https://api.github.com/repos/{repo}/tags")
+            up = json.loads(d)[0]["name"] if d else "?"
+    print(f"{pkg}\t{ovver(cat, pn)}\t{up}")
+for pkg, name in NPM.items():
+    cat, pn = pkg.split("/")
+    d = get(f"https://registry.npmjs.org/{name}/latest")
+    print(f"{pkg}\t{ovver(cat, pn)}\t{json.loads(d)['version'] if d else '?'}")
