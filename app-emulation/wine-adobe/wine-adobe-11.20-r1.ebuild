@@ -7,7 +7,7 @@ inherit optfeature wine
 
 WINE_GECKO=2.47.4
 WINE_MONO=11.3.0
-ADOBEWINE_PV=0.6.1
+ADOBEWINE_PV=0.6.3
 (( $(ver_cut 2) )) && WINE_SDIR=$(ver_cut 1).x || WINE_SDIR=$(ver_cut 1).0
 
 DESCRIPTION="Wine with the LinDobe (AdobeWine) patchset for Adobe Creative Cloud apps"
