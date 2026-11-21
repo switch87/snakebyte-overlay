@@ -407,14 +407,14 @@ BDEPEND="
 
 QA_FLAGS_IGNORED="usr/libexec/stremio/stremio"
 
+src_configure() {
+	# Upstream reads the locale dir from this at build time
+	export STREMIO_LOCALEDIR="${EPREFIX}/usr/share/locale"
+	cargo_src_configure
+}
+
 src_prepare() {
 	default
-
-	# Upstream only knows the in-tree (dev) and flatpak locale dirs.
-	sed -i \
-		-e 's|concat!(env!("CARGO_MANIFEST_DIR"), "/po")|"/usr/share/locale"|' \
-		src/config.rs || die
-	grep -q '"/usr/share/locale"' src/config.rs || die "locale path sed failed"
 
 	# build.rs compiles the GSettings schema into the user's data dir;
 	# we install and compile it system-wide instead.
