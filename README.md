@@ -489,7 +489,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-gfx/cadcraft` | 0.20.1 | CADCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks cadcraft-bin |
 | `media-gfx/cadcraft-bin` | 0.20.1 | CADCraft 2D drafting (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball (ships no icon); early alpha |
 | `media-gfx/designcraft` | 0.20.1 | DesignCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks designcraft-bin |
-| `media-gfx/designcraft-bin` | 0.20.1 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
+| `media-gfx/designcraft-bin` | 0.21.1 | DesignCraft page layout for print and screen (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; early alpha |
 | `media-gfx/lightburn-bin` | 1.7.08 | LightBurn, last native Linux release | all-rights-reserved | |
 | `media-gfx/lightburn-wine` | 2.2.01 | LightBurn, Windows build via Wine | all-rights-reserved, GPL-2 (stub DLL) | no camera support; 2.1.04 kept as fallback for licenses whose update period ends before 2.2 |
 | `media-gfx/lightcraft` | 0.21.1 | LightCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks lightcraft-bin; USE=avif, jpegxl |
@@ -504,7 +504,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `media-sound/noson-app` | 5.7.8 | SONOS controller (Qt 6) | GPL-3 | newer than `::guru` |
 | `media-sound/soundcraft-bin` | 0.20.1 | SoundCraft digital audio workstation (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `media-video/effectcraft` | 0.24.1 | EffectCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks effectcraft-bin; USE=pipewire; git crates from storytold/filmcraft |
-| `media-video/effectcraft-bin` | 0.24.1 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
+| `media-video/effectcraft-bin` | 0.25.1 | EffectCraft motion graphics and visual effects (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `media-video/filmcraft` | 0.20.1 | FilmCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks filmcraft-bin; USE=pipewire, whisper |
 | `media-video/filmcraft-bin` | 0.20.1 | FilmCraft video editor (Rust, wgpu) | MIT or Apache-2.0 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]` so ALSA playback reaches PipeWire |
 | `media-video/stremio` | 1.3.0 | Stremio (GTK 4 / WebKitGTK shell) | GPL-3 | patched to build against stable GTK |
