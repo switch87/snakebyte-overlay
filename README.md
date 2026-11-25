@@ -453,7 +453,7 @@ device, e.g. `usermod -aG dialout <user>`.
 | `app-office/deckcraft-bin` | 0.19.1 | DeckCraft presentations and slide shows (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; USE=pipewire (default) forces `media-video/pipewire[pipewire-alsa]`; early alpha |
 | `app-office/gridcraft` | 0.19.1 | GridCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks gridcraft-bin |
 | `app-office/gridcraft-bin` | 0.19.1 | GridCraft spreadsheet (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
-| `app-office/wordcraft` | 0.18.1 | WordCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks wordcraft-bin; USE=cjk |
+| `app-office/wordcraft` | 0.19.1 | WordCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks wordcraft-bin; USE=cjk |
 | `app-office/wordcraft-bin` | 0.19.1 | WordCraft word processor with .docx support (Rust, wgpu) | MIT or Apache-2.0, OFL-1.1 | upstream Linux tarball; early alpha |
 | `app-text/pdfcraft` | 0.21.1 | PdfCraft built from source (cargo, crate tarball) | MIT or Apache-2.0 (+ crate licences) | blocks pdfcraft-bin; USE=mcp |
 | `app-text/pdfcraft-bin` | 0.22.0 | PdfCraft PDF reader and editor (Rust, wgpu); renamed from PrintCraft | MIT or Apache-2.0 | upstream Linux tarball (storytold/pdfcraft); early alpha |
